@@ -717,6 +717,13 @@ public:
         size_t remesher_iterations=15;
         ScalarType remesher_aspect_ratio=0.3;
         ScalarType remesher_termination_delta = 10000;
+        // Nach dem Remeshing verwirft AutoRemesher::UpdateCoherentSharp
+        // jede markierte Feature-Kante mit Diederwinkel unter diesem
+        // Wert. Fuer GLATTE, von aussen vorgegebene Featurelinien (aus
+        // einer .sharp-Datei) ist der Winkel 0 -- die wuerden also alle
+        // geloescht. 0 schaltet das Aufraeumen ab (siehe die
+        // Fruehruecksprung-Bedingung dort).
+        ScalarType crease_angle = 25;
     };
 
     static void BatchProcess(MeshType &mesh,BatchParam &BPar,
@@ -742,6 +749,7 @@ public:
             RemPar.targetAspect = BPar.remesher_aspect_ratio;
             RemPar.targetDeltaFN= BPar.remesher_termination_delta;
             RemPar.surfDistCheck = BPar.surf_dist_check;
+            RemPar.creaseAngle  = BPar.crease_angle;
 
             //AutoRemesher<MeshType>::Remesh2(mesh,RemPar);
             AutoRemesher<MeshType>::RemeshAdapt(mesh,RemPar);

@@ -18,10 +18,12 @@ inline void remeshAndField(
     BPar.sharp_feature_thr=parameters.sharpAngle;
     BPar.surf_dist_check=true;
     BPar.UpdateSharp=(!parameters.hasFeature);
+    BPar.crease_angle=parameters.crease_angle;
 
     typename vcg::tri::FieldSmoother<FieldTriMesh>::SmoothParam FieldParam;
-    FieldParam.alpha_curv=0.3;
+    FieldParam.alpha_curv=parameters.alpha_curv;
     FieldParam.curv_thr=0.8;
+    std::cout<<"Alpha Curvature: "<<FieldParam.alpha_curv<<std::endl;
 
     if (parameters.hasFeature) {
         bool loaded=trimesh.LoadSharpFeatures(sharpFilename);
@@ -246,6 +248,15 @@ inline bool loadConfigFile(const std::string& filename, Parameters& parameters)
     fscanf(f,"alpha %f\n",&parameters.alpha);
 
     fscanf(f,"scaleFact %f\n",&parameters.scaleFact);
+
+    // Optional -- aeltere Config-Dateien haben diese Zeile nicht. fscanf
+    // liefert dann 0 Treffer und laesst parameters.alpha_curv unberuehrt,
+    // also beim Default aus dem Parameters()-Konstruktor (0.3, der bisher
+    // hart verdrahtete Wert). Kein Fehlerfall, kein Abbruch noetig.
+    fscanf(f,"alpha_curv %f\n",&parameters.alpha_curv);
+
+    // Ebenfalls optional; fehlt die Zeile, bleibt der Default 25.
+    fscanf(f,"crease_angle %f\n",&parameters.crease_angle);
 
     fclose(f);
 

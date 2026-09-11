@@ -142,9 +142,10 @@ int actual_main(int argc, char *argv[])
     sw_load.resume();
     loadSetupFile(configFilename, parameters, scaleFactor, fixedChartClusters);
 
-    parameters.chartSmoothingIterations = 0; //Chart smoothing
-    parameters.quadrangulationFixedSmoothingIterations = 0; //Smoothing with fixed borders of the patches
-    parameters.quadrangulationNonFixedSmoothingIterations = 0; //Smoothing with fixed borders of the quadrangulation
+    // Die drei Glaettungsschritte standen hier fest auf 0 und haben
+    // damit ueberschrieben, was in der Konfiguration stand. Jetzt liest
+    // sie loadSetupFile als optionale Zeilen; fehlen sie, bleibt es bei
+    // 0, also beim bisherigen Verhalten.
     parameters.feasibilityFix = false;
 
 
@@ -192,8 +193,7 @@ int actual_main(int argc, char *argv[])
     featureCFilename.erase(featureCFilename.find_last_of("."));
     featureCFilename.append(".c_feature");
     trimeshFeaturesC = loadFeatureCorners(featureCFilename);
-    std::cout<<"Loaded "<<featureCFilename.size()<<" corner features"<<std::endl;
-    loadFeatureCorners(featureCFilename);
+    std::cout<<"Loaded "<<trimeshFeaturesC.size()<<" corner features"<<std::endl;
 
     OrientIfNeeded(trimesh,trimeshPartitions,trimeshCorners,trimeshFeatures,trimeshFeaturesC);
 
@@ -477,6 +477,30 @@ void loadSetupFile(const std::string& path, QuadRetopology::Parameters& paramete
     ret = fscanf(f,"satsuma_config_filename \"%1000[^\"]\"\n",filename.data());
     parameters.satsuma_config_filename = filename.data();
     std::cout << "satsuma_config_filename: " << parameters.satsuma_config_filename << std::endl;
+
+    // Optionale Zeilen am Ende: Glaettung der Quadrangulierung.
+    // chartSmoothing laeuft je Patch mit festgehaltenem Patchrand
+    // (LaplacianReproject, mit Rueckprojektion auf die Dreiecksflaeche)
+    // und ist das Mittel gegen in sich gefaltete Vierecke in schmalen
+    // Patches. Fehlen die Zeilen, bleiben die Werte auf 0 -- das
+    // bisherige Verhalten.
+    parameters.chartSmoothingIterations = 0;
+    parameters.quadrangulationFixedSmoothingIterations = 0;
+    parameters.quadrangulationNonFixedSmoothingIterations = 0;
+
+    IntVar = 0;
+    if (fscanf(f,"chartSmoothingIterations %d\n",&IntVar) == 1)
+        parameters.chartSmoothingIterations = IntVar;
+    IntVar = 0;
+    if (fscanf(f,"quadrangulationFixedSmoothingIterations %d\n",&IntVar) == 1)
+        parameters.quadrangulationFixedSmoothingIterations = IntVar;
+    IntVar = 0;
+    if (fscanf(f,"quadrangulationNonFixedSmoothingIterations %d\n",&IntVar) == 1)
+        parameters.quadrangulationNonFixedSmoothingIterations = IntVar;
+    std::cout << "chartSmoothingIterations: " << parameters.chartSmoothingIterations
+              << ", quadrangulationFixed: " << parameters.quadrangulationFixedSmoothingIterations
+              << ", quadrangulationNonFixed: " << parameters.quadrangulationNonFixedSmoothingIterations
+              << std::endl;
     fclose(f);
 }
 

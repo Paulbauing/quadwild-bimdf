@@ -15,8 +15,18 @@
 #
 # Aufruf:
 #   ./run_quadwild.sh -i input.obj \
-#       [-sharp 35] [-alpha 0.01] [-alpha2 0.005] [-scale 1] [-noremesh] \
-#       [-prepconfig DATEI] [-mainconfig DATEI] [-tag LABEL]
+#       [-sharp 35] [-alpha 0.01] [-alpha2 0.005] [-alphacurv 0.3] [-scale 1] [-noremesh] \
+#       [-sharpfile DATEI] [-creaseangle 25] [-prepconfig DATEI] \
+#       [-mainconfig DATEI] [-tag LABEL]
+#
+# Harte Constraints: -sharpfile uebergibt eine .sharp-Datei mit fest
+# vorgegebenen Feature-Kanten (Format: erste Zeile Anzahl, dann je Zeile
+# "Typ,FaceIndex,KantenIndex" mit Typ 0=konkav/1=konvex, Kante 0..2 --
+# Indizes beziehen sich auf DAS Eingabenetz). Damit schaltet quadwild die
+# automatische Winkel-Erkennung ab (UpdateSharp=false in functions.cpp).
+# Das Remeshing darf dabei anbleiben: -sharpfile setzt crease_angle auf 0,
+# und nur dieses nachgelagerte Aufraeumen (UpdateCoherentSharp) hatte die
+# Vorgaben bisher wieder verworfen. Der Remesher selbst haelt sie.
 #
 # Ergebnis liegt danach unter:
 #   runs/<eingabename>__<parameter-kuerzel>/output/<derselbe-name>.obj
@@ -61,13 +71,33 @@ QFP_BIN="$BUILD/Build/bin/quad_from_patches"
 usage() {
     echo "Aufruf: $0 -i input.obj [Optionen]" >&2
     echo "  -sharp GRAD        sharp_feature_thr (Default: 35)" >&2
+    echo "  -sharpfile DATEI   .sharp-Datei mit vorgegebenen Feature-Kanten als" >&2
+    echo "                     harte Constraints, statt automatischer Erkennung" >&2
+    echo "                     ueber -sharp. Setzt -creaseangle automatisch auf 0" >&2
+    echo "                     (sonst verwirft der Remesher die Vorgaben wieder)" >&2
+    echo "  -creaseangle GRAD  Diederwinkel, unter dem der Remesher markierte" >&2
+    echo "                     Feature-Kanten NACH dem Remeshing wieder verwirft" >&2
+    echo "                     (AutoRemesher::UpdateCoherentSharp). 0 schaltet das" >&2
+    echo "                     Aufraeumen ab und erhaelt auch glatte Linien" >&2
+    echo "                     ohne Knick. Default 25 wie in QuadWild" >&2
     echo "  -alpha WERT        alpha fuer Remesh/Feld-Stufe (Default: 0.01)" >&2
     echo "  -alpha2 WERT       alpha fuer Quantisierungs-Stufe (Default: 0.005)" >&2
+    echo "  -alphacurv WERT    Gewicht des Kruemmungsterms in der Kreuzfeld-" >&2
+    echo "                     Glaettung: 0 = kein direkter Kruemmungseinfluss," >&2
+    echo "                     groesser = staerker an Hauptkruemmungsrichtung" >&2
+    echo "                     ausgerichtet, auf Kosten der Glattheit (Default: 0.3)" >&2
     echo "  -scale WERT        scaleFact in BEIDEN Stufen, steuert die Faceanzahl:" >&2
     echo "                     groesser = groebere/weniger Quads, kleiner = mehr Quads" >&2
     echo "                     (Faceanzahl skaliert grob mit 1/scaleFact^2; Default: 1)" >&2
     echo "  -noremesh          Remesh-Schritt ueberspringen (do_remesh 0)" >&2
     echo "  -prepconfig DATEI  eigene prep_config-Datei statt der obigen Flags" >&2
+    echo "  -chartsmooth N     Glaettungsdurchlaeufe je Patch nach der" >&2
+    echo "                     Quadrangulierung, Patchrand fest (Default 0)" >&2
+    echo "  -quadsmooth N      Glaettung der ganzen Quadrangulierung mit" >&2
+    echo "                     FESTEN Patchraendern, also unter Erhalt der" >&2
+    echo "                     Feature-Linien (Default 0)" >&2
+    echo "  -quadsmoothfree N  dasselbe ohne feste Raender -- glaettet" >&2
+    echo "                     staerker, verschiebt aber die Features" >&2
     echo "  -mainconfig DATEI  eigene main_config-Datei (Default: flow_noalign_lemon.txt)" >&2
     echo "  -tag LABEL         Laufordner zusaetzlich mit LABEL kennzeichnen" >&2
     echo "                     (fuer zwei Laeufe mit sonst identischen Parametern)" >&2
@@ -99,17 +129,28 @@ add_token() {
 }
 
 in_mesh=""
-sharp_thr=35 alpha1=0.01 alpha2=0.005 scale_fact=1 do_remesh=1
-prep_config="" main_config="" tag="" tokens=""
+sharp_thr=35 alpha1=0.01 alpha2=0.005 alpha_curv=0.3 scale_fact=1 do_remesh=1
+# Glaettung der fertigen Quadrangulierung. Standen in quad_from_patches
+# fest auf 0; chart_smooth laeuft je Patch mit festem Patchrand und
+# zieht in sich gefaltete Vierecke wieder auf.
+chart_smooth=0 quad_smooth_fixed=0 quad_smooth_free=0
+crease_angle=25 crease_set=0
+prep_config="" main_config="" sharp_file="" tag="" tokens=""
 alpha2_set=0 scale_set=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -i) in_mesh=$(abspath "$2"); shift 2 ;;
         -sharp) sharp_thr="$2"; add_token "sharp${2}"; shift 2 ;;
+        -sharpfile) sharp_file=$(abspath "$2"); add_token "SHARPFILETOKEN"; shift 2 ;;
         -alpha) alpha1="$2"; add_token "alpha1-${2}"; shift 2 ;;
         -alpha2) alpha2="$2"; alpha2_set=1; add_token "alpha2-${2}"; shift 2 ;;
+        -alphacurv) alpha_curv="$2"; add_token "acurv${2}"; shift 2 ;;
+        -creaseangle) crease_angle="$2"; crease_set=1; add_token "crease${2}"; shift 2 ;;
         -scale) scale_fact="$2"; scale_set=1; add_token "scale${2}"; shift 2 ;;
+        -chartsmooth) chart_smooth="$2"; add_token "csm${2}"; shift 2 ;;
+        -quadsmooth) quad_smooth_fixed="$2"; add_token "qsm${2}"; shift 2 ;;
+        -quadsmoothfree) quad_smooth_free="$2"; add_token "qsmf${2}"; shift 2 ;;
         -noremesh) do_remesh=0; add_token "noremesh"; shift ;;
         -prepconfig) prep_config=$(abspath "$2")
                     add_token "prep-$(basename "$2" .txt)"; shift 2 ;;
@@ -143,6 +184,21 @@ in_stem=$(basename "$in_mesh")
 in_stem="${in_stem%.*}"
 in_ext="${in_mesh##*.}"
 
+# Das -sharpfile-Kuerzel haengt vom Eingabenamen ab, der erst hier
+# feststeht -- darum beim Parsen nur ein Platzhalter, der die Position
+# in der Kuerzelkette (und damit die Reihenfolge der Flags) haelt.
+if [ -n "$sharp_file" ]; then
+    sharp_stem=$(basename "$sharp_file" .sharp)
+    # Begleitdatei zum Netz (gleicher Stem) -> "sharpfile" reicht, sonst
+    # waere der Name doppelt. Abweichender Stem -> mitnehmen, sonst ist
+    # nicht erkennbar, welche Vorgabe im Lauf steckt.
+    if [ "$sharp_stem" = "$in_stem" ]; then
+        tokens="${tokens/SHARPFILETOKEN/sharpfile}"
+    else
+        tokens="${tokens/SHARPFILETOKEN/sharpfile-${sharp_stem}}"
+    fi
+fi
+
 run_name="$in_stem"
 [ -n "$tokens" ] && run_name="${in_stem}__${tokens}"
 [ -n "$tag" ] && run_name="${run_name}__${tag}"
@@ -158,6 +214,9 @@ echo "Laufordner: $run_dir"
 # Reines Referenzexemplar der Eingabe -- unabhaengig davon, unter
 # welchem Namen QuadWild intern arbeitet.
 cp "$in_mesh" "$run_dir/input/$(basename "$in_mesh")"
+if [ -n "$sharp_file" ]; then
+    cp "$sharp_file" "$run_dir/input/$(basename "$sharp_file")"
+fi
 
 # Arbeitskopie in output/: QuadWild haengt an den *Eingabe*-Dateinamen
 # feste Suffixe (_rem, _rem_p0, ..._quadrangulation) und schreibt
@@ -165,6 +224,21 @@ cp "$in_mesh" "$run_dir/input/$(basename "$in_mesh")"
 # in output/, damit alle Zwischenergebnisse dort ohne Umkopieren landen.
 work_mesh="$run_dir/output/${in_stem}.${in_ext}"
 cp "$in_mesh" "$work_mesh"
+
+# Nicht der Remesher selbst verwirft vorgegebene Feature-Kanten -- er
+# haelt sie (userSelectedCreases=true in AutoRemesher.h). Es ist das
+# Aufraeumen DANACH: UpdateCoherentSharp loescht jede markierte Kante,
+# deren Diederwinkel unter creaseAngle liegt. Glatte Ridge-Linien haben
+# Winkel 0 und fallen damit komplett heraus. Gemessen an einem Testnetz:
+# Feature-Laenge 10.79 vorher -> 4.10 mit creaseAngle 25, aber 10.68 mit 0,
+# und das bei aktivem Remeshing (min. Innenwinkel 0.0 -> 14.1 Grad, keine
+# entarteten Dreiecke mehr). Darum bei -sharpfile automatisch auf 0,
+# solange nichts anderes verlangt wurde.
+if [ -n "$sharp_file" ] && [ "$crease_set" = "0" ]; then
+    crease_angle=0
+    echo "run_quadwild.sh: -sharpfile gesetzt -> crease_angle 0 (sonst wuerde"
+    echo "der Remesher die vorgegebenen Feature-Kanten nachtraeglich verwerfen)."
+fi
 
 # prep_config fuer Stufe 1 (Remesh + Feld) erzeugen, falls keine eigene
 # Datei angegeben wurde -- so bleiben -sharp/-alpha/-scale/-noremesh direkt
@@ -176,6 +250,8 @@ if [ -z "$prep_config" ]; then
         echo "sharp_feature_thr $sharp_thr"
         echo "alpha $alpha1"
         echo "scaleFact $scale_fact"
+        echo "alpha_curv $alpha_curv"
+        echo "crease_angle $crease_angle"
     } > "$prep_config"
 fi
 
@@ -203,6 +279,17 @@ if [ "$scale_set" = 1 ] || [ "$alpha2_set" = 1 ]; then
             echo "alpha $alpha2" >> "$patched_main_config"
         fi
     fi
+    for zeile in "chartSmoothingIterations $chart_smooth" \
+                 "quadrangulationFixedSmoothingIterations $quad_smooth_fixed" \
+                 "quadrangulationNonFixedSmoothingIterations $quad_smooth_free"; do
+        schluessel=${zeile%% *}
+        if grep -q "^$schluessel " "$patched_main_config"; then
+            sed -i '' "s/^$schluessel .*/$zeile/" "$patched_main_config"
+        else
+            echo "$zeile" >> "$patched_main_config"
+        fi
+    done
+
     main_config="$patched_main_config"
 fi
 
@@ -229,7 +316,13 @@ fi
 # (flow_config_filename, satsuma_config_filename) relativ zum
 # Arbeitsverzeichnis auf -- deshalb muss die Pipeline mit cwd=REPO laufen.
 cd "$REPO"
-"$QUADWILD_BIN" "$work_mesh" 2 "$prep_config" 2>&1 | tee -a "$meta"
+# Die .sharp-Datei erkennt quadwild an der Endung unter den optionalen
+# Positionsargumenten ab Index 3 (quadwild.cpp), nicht ueber die Config.
+if [ -n "$sharp_file" ]; then
+    "$QUADWILD_BIN" "$work_mesh" 2 "$prep_config" "$sharp_file" 2>&1 | tee -a "$meta"
+else
+    "$QUADWILD_BIN" "$work_mesh" 2 "$prep_config" 2>&1 | tee -a "$meta"
+fi
 
 rem_p0="$run_dir/output/${in_stem}_rem_p0.obj"
 if [ ! -f "$rem_p0" ]; then

@@ -44,3 +44,7 @@ CMakeLists.txt.user
 /build*
 .DS_Store
 /.vs
+
+# Laufordner und Eingabenetze -- Ausgabe bzw. Daten, nicht Quelltext
+runs/
+sources/

@@ -18,6 +18,8 @@ struct Parameters {
         sharpAngle(35),
         alpha(0.02),
         scaleFact(1),
+        alpha_curv(0.3),
+        crease_angle(25),
         hasFeature(false),
         hasField(false)
     {
@@ -28,6 +30,17 @@ struct Parameters {
     float sharpAngle;
     float alpha;
     float scaleFact;
+    // Gewicht des Kruemmungsterms in der Kreuzfeld-Glaettung (siehe
+    // vcg::tri::FieldSmoother::SmoothParam::alpha_curv): 0 = Feld nur
+    // ueber Nachbarschaftsglaettung/Feature-Ausrichtung, kein direkter
+    // Kruemmungseinfluss; groesser = staerker an der Hauptkruemmungs-
+    // richtung ausgerichtet, auf Kosten der Glattheit. War vorher fest
+    // auf 0.3 verdrahtet (quadwild/functions.cpp).
+    float alpha_curv;
+    // Diederwinkel-Schwelle, unterhalb derer der Remesher markierte
+    // Feature-Kanten nachtraeglich wieder verwirft. Vorgegebene glatte
+    // Linien (.sharp) haben Winkel 0 und ueberleben nur mit 0 hier.
+    float crease_angle;
     bool hasFeature;
     bool hasField;
 };
