@@ -5,7 +5,7 @@
 # ihn dir an, ohne den Pfad runs/<name>/output/<name>.obj von Hand
 # zusammensuchen zu muessen.
 #
-# Der eigentliche Viewer (Evaluation/viewer.py) bleibt bewusst
+# Der eigentliche Viewer (src/core/viewer.py) bleibt bewusst
 # allgemein -- er kennt weder QuadWild noch runs/. Dieses Skript ist die
 # Bruecke: es loest den Laufnamen zu den passenden Dateien auf und ruft
 # viewer.py im richtigen venv damit auf.
@@ -30,7 +30,7 @@ set -eo pipefail   # bewusst ohne -u: braucht hier Arrays, und macOS
 
 REPO="${QW_REPO:-$HOME/dev/masterarbeit/quadwild-bimdf}"
 RUNS="${QW_RUNS:-$REPO/runs}"
-EVAL_DIR="${QW_EVAL:-$HOME/dev/masterarbeit/Evaluation}"
+EVAL_DIR="${QW_SRC:-${QW_EVAL:-$HOME/dev/masterarbeit/src}}"
 PYTHON="$EVAL_DIR/.venv/bin/python"
 
 list_runs() {
@@ -100,7 +100,7 @@ if [ "$want_ref" = 1 ]; then
     else
         case "$ref" in
             *.obj|*.off) args+=(--ref "$ref") ;;
-            *) echo "view_run.sh: --ref uebersprungen -- Evaluation/meshio.py" >&2
+            *) echo "view_run.sh: --ref uebersprungen -- src/core/meshio.py" >&2
                echo "kann nur .obj/.off laden, Eingabe ist $(basename "$ref")." >&2 ;;
         esac
     fi
@@ -108,4 +108,5 @@ fi
 
 echo "Oeffne: ${args[0]}"
 cd "$EVAL_DIR"
-exec "$PYTHON" viewer.py "${args[@]}" "${extra[@]}"
+# viewer.py liegt seit dem Paketumbau in core/, nicht mehr flach.
+exec "$PYTHON" core/viewer.py "${args[@]}" "${extra[@]}"

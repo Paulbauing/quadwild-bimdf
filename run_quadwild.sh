@@ -451,7 +451,7 @@ fi
 if [ -n "$merge_patches" ] || [ -n "$merge_inradius" ]; then
     [ -n "$merge_patches" ] || merge_patches=0
     # patch_merge.py liegt seit dem Paketumbau unter quadwild/ statt flach.
-    merge_wurzel="$REPO/../Evaluation"
+    merge_wurzel="${QW_SRC:-$REPO/../src}"
     merge_py="$merge_wurzel/quadwild/patch_merge.py"
     merge_bin="$merge_wurzel/.venv/bin/python"
     [ -x "$merge_bin" ] || merge_bin="python3"
