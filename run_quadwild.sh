@@ -450,11 +450,12 @@ fi
 # Grenze, die Featurelinien bleiben also unangetastet.
 if [ -n "$merge_patches" ] || [ -n "$merge_inradius" ]; then
     [ -n "$merge_patches" ] || merge_patches=0
-    # patch_merge.py liegt seit dem Paketumbau unter quadwild/ statt flach.
-    merge_wurzel="${QW_SRC:-$REPO/../src}"
-    merge_py="$merge_wurzel/quadwild/patch_merge.py"
-    merge_bin="$merge_wurzel/.venv/bin/python"
-    [ -x "$merge_bin" ] || merge_bin="python3"
+    # patch_merge.py liegt in diesem Repo (tools/) und kommt mit numpy aus.
+    # Frueher lag es im Auswertungs-Repo, und der Aufruf brauchte dessen
+    # Pfad und dessen venv -- eine Abhaengigkeit ueber die Repogrenze fuer
+    # ein Skript, das ausschliesslich hier gebraucht wird.
+    merge_py="$REPO/tools/patch_merge.py"
+    merge_bin="${QW_PYTHON:-python3}"
     if [ -f "$merge_py" ]; then
         {
             echo
