@@ -3,7 +3,8 @@
 	url = https://github.com/cnr-isti-vclab/vcglib.git
 [submodule "libs/xfield_tracer"]
 	path = libs/xfield_tracer
-	url = https://github.com/cgg-bern/xfield_tracer_fork
+	url = https://github.com/Paulbauing/xfield_tracer_fork
+	branch = masterarbeit
 [submodule "libs/satsuma"]
 	path = libs/satsuma
 	url = https://github.com/cgg-bern/libsatsuma
