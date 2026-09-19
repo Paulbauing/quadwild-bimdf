@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ****************************************************************************/
 
 #include <vcg/complex/complex.h>
+#include <algorithm>
 #include <vcg/complex/algorithms/polygonal_algorithms.h>
 #include <vcg/complex/algorithms/update/topology.h>
 #include <vcg/complex/algorithms/update/bounding.h>
@@ -63,6 +64,18 @@ using HSW = Timekeeper::HierarchicalStopWatch;
 using Timekeeper::ScopedStopWatch;
 
 bool LocalUVSm=false;
+
+// Glaettung der Quadrangulierung am Ende (MultiCostraintSmooth). Beide
+// Werte waren fest verdrahtet (30 Schritte, keine Faltenpruefung). Die
+// Faltenpruefung ist aus Vorgabe, damit sich ohne ausdruecklichen Schalter
+// nichts am bisherigen Ergebnis aendert.
+int finalSmoothSteps=30;
+bool finalSmoothFoldGuard=false;
+// Untergrenze fuer die kuerzeste Kante einer Facette waehrend der
+// Glaettung, als Anteil der Zielkantenlaenge. Greift nur mit
+// Faltenpruefung. Zu klein gewaehlt laesst die Glaettung Vierecke am
+// Rand bis auf einen Bruchteil ihrer Breite zusammendruecken.
+float finalSmoothMinEdge=0.25f;
 typename TriangleMesh::ScalarType avgEdge(const TriangleMesh& trimesh);
 void loadSetupFile(const std::string& path, QuadRetopology::Parameters& parameters, float& scaleFactor, int& fixedChartClusters);
 void SaveSetupFile(const std::string& path, QuadRetopology::Parameters& parameters, float& scaleFactor, int& fixedChartClusters);
@@ -203,7 +216,59 @@ int actual_main(int argc, char *argv[])
     QuadRetopology::internal::updateAllMeshAttributes(trimesh);
     double EdgeSize=avgEdge(trimesh)*scaleFactor;
     std::cout<<"Edge Size "<<EdgeSize<<std::endl;
-    const std::vector<double> edgeFactor(trimeshPartitions.size(), EdgeSize);
+
+    // ORTSABHAENGIGE ZIELDICHTE. edgeFactor ist ein Eintrag JE PATCH, und
+    // beide Quantisierer lesen ihn patchweise: qr_ilp.cpp nimmt
+    // chartEdgeLength[cId], qr_flow.cpp (Bi-MDF) chart_edge_length[chart_id].
+    // Gefuellt wurde er hier bisher nur konstant. Liegt neben dem Netz eine
+    // Datei <netz>.patchscale, wird sie als Faktor je Patch darauf gelegt:
+    //
+    //     erste Zeile   Anzahl der Patches
+    //     dann je Zeile ein Faktor, Reihenfolge wie in der .patch-Datei
+    //
+    // Faktor 1 laesst den Patch unveraendert, groesser macht ihn groeber,
+    // kleiner feiner. Fehlt die Datei, bleibt es beim konstanten Wert --
+    // das bisherige Verhalten.
+    std::vector<double> edgeFactor(trimeshPartitions.size(), EdgeSize);
+    {
+        std::string scaleFilename = meshFilename;
+        size_t dot = scaleFilename.find_last_of(".");
+        if (dot != std::string::npos)
+            scaleFilename.erase(dot);
+        scaleFilename.append(".patchscale");
+
+        FILE *fs = fopen(scaleFilename.c_str(), "rt");
+        if (fs != nullptr) {
+            int nScale = 0;
+            if (fscanf(fs, "%d", &nScale) == 1) {
+                if (nScale != static_cast<int>(edgeFactor.size())) {
+                    std::cout << "Warnung: " << scaleFilename << " nennt "
+                              << nScale << " Patches, das Netz hat "
+                              << edgeFactor.size()
+                              << " -- Datei wird ignoriert." << std::endl;
+                } else {
+                    double lo = 1e30, hi = -1e30;
+                    bool ok = true;
+                    for (int i = 0; i < nScale; i++) {
+                        double v = 1.0;
+                        if (fscanf(fs, "%lf", &v) != 1) { ok = false; break; }
+                        if (v <= 0.0) v = 1.0;
+                        edgeFactor[i] *= v;
+                        lo = std::min(lo, v);
+                        hi = std::max(hi, v);
+                    }
+                    if (!ok)
+                        std::cout << "Warnung: " << scaleFilename
+                                  << " unvollstaendig, Rest bleibt bei 1."
+                                  << std::endl;
+                    std::cout << "Patchweise Zieldichte aus "
+                              << scaleFilename << ": Faktor " << lo
+                              << " bis " << hi << std::endl;
+                }
+            }
+            fclose(fs);
+        }
+    }
     auto qfp_result = qfp::quadrangulationFromPatches(trimesh, trimeshPartitions, trimeshCorners, edgeFactor, parameters, fixedChartClusters, quadmesh, quadmeshPartitions, quadmeshCorners, ilpResult);
 
 
@@ -260,10 +325,13 @@ int actual_main(int argc, char *argv[])
 
     std::cout<<"** SMOOTHING **"<<std::endl;
     //SmoothSubdivide(trimesh,quadmesh,trimeshFeatures,trimeshFeaturesC,TriPart,QuadCornersVect,QuadPart,100,0.5,EdgeSize);
+    std::cout<<"finalSmoothSteps: "<<finalSmoothSteps
+             <<", Faltenpruefung: "<<(finalSmoothFoldGuard?"an":"aus")
+             <<", Mindestkante "<<finalSmoothMinEdge<<" x Zielkante"<<std::endl;
     if (LocalUVSm)
-        LocalUVSmooth(quadmesh,trimesh,trimeshFeatures,trimeshFeaturesC,30);
+        LocalUVSmooth(quadmesh,trimesh,trimeshFeatures,trimeshFeaturesC,finalSmoothSteps);
     else
-        MultiCostraintSmooth(quadmesh,trimesh,trimeshFeatures,trimeshFeaturesC,TriPart,QuadCornersVect,QuadPart,0.5,EdgeSize,30,1);
+        MultiCostraintSmooth(quadmesh,trimesh,trimeshFeatures,trimeshFeaturesC,TriPart,QuadCornersVect,QuadPart,0.5,EdgeSize,finalSmoothSteps,1,finalSmoothFoldGuard,finalSmoothMinEdge);
 
     sw_smooth.stop();
     sw_save.resume();
@@ -497,6 +565,23 @@ void loadSetupFile(const std::string& path, QuadRetopology::Parameters& paramete
     IntVar = 0;
     if (fscanf(f,"quadrangulationNonFixedSmoothingIterations %d\n",&IntVar) == 1)
         parameters.quadrangulationNonFixedSmoothingIterations = IntVar;
+
+    // Die ABSCHLIESSENDE Glaettung ist eine andere Stufe als die drei
+    // obigen: die laufen in quadrangulationFromPatches, diese danach in
+    // main. Deshalb aendert es nichts an ihr, die drei auf 0 zu setzen --
+    // sie kostet trotzdem den Grossteil der Laufzeit und erzeugt die
+    // Bowties.
+    IntVar = 0;
+    if (fscanf(f,"finalSmoothSteps %d\n",&IntVar) == 1)
+        finalSmoothSteps = IntVar;
+    IntVar = 0;
+    if (fscanf(f,"finalSmoothFoldGuard %d\n",&IntVar) == 1)
+        finalSmoothFoldGuard = (IntVar != 0);
+    {
+        float FltVar = 0;
+        if (fscanf(f,"finalSmoothMinEdge %f\n",&FltVar) == 1)
+            finalSmoothMinEdge = FltVar;
+    }
     std::cout << "chartSmoothingIterations: " << parameters.chartSmoothingIterations
               << ", quadrangulationFixed: " << parameters.quadrangulationFixedSmoothingIterations
               << ", quadrangulationNonFixed: " << parameters.quadrangulationNonFixedSmoothingIterations

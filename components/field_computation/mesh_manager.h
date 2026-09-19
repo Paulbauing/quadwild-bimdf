@@ -724,6 +724,11 @@ public:
         // geloescht. 0 schaltet das Aufraeumen ab (siehe die
         // Fruehruecksprung-Bedingung dort).
         ScalarType crease_angle = 25;
+        // Randvertices beim Aufraeumen der Splitterdreiecke nach dem
+        // Remeshing festhalten -- siehe collapseSurvivingMicroEdges in
+        // AutoRemesher.h. Ohne das zieht der Remesher ein Viertel des
+        // Randes ins Innere und der Rand wird zackig.
+        bool keep_border = false;
     };
 
     static void BatchProcess(MeshType &mesh,BatchParam &BPar,
@@ -750,6 +755,7 @@ public:
             RemPar.targetDeltaFN= BPar.remesher_termination_delta;
             RemPar.surfDistCheck = BPar.surf_dist_check;
             RemPar.creaseAngle  = BPar.crease_angle;
+            RemPar.keepBorder   = BPar.keep_border;
 
             //AutoRemesher<MeshType>::Remesh2(mesh,RemPar);
             AutoRemesher<MeshType>::RemeshAdapt(mesh,RemPar);

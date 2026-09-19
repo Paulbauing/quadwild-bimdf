@@ -19,6 +19,21 @@ inline void remeshAndField(
     BPar.surf_dist_check=true;
     BPar.UpdateSharp=(!parameters.hasFeature);
     BPar.crease_angle=parameters.crease_angle;
+    BPar.keep_border=parameters.keepBorder;
+    extern bool TraceFixFeatureBorders;
+    TraceFixFeatureBorders=parameters.fixFeatureBorders;
+    extern int TracePatchSmoothSteps;
+    if (parameters.patchSmooth>=0) TracePatchSmoothSteps=parameters.patchSmooth;
+    extern int TraceMinVal; extern int TraceMaxVal;
+    extern double TraceCClarkability, TraceDrift, TraceSampleRatio;
+    if (parameters.traceMinVal>0)  TraceMinVal=parameters.traceMinVal;
+    if (parameters.traceMaxVal>0)  TraceMaxVal=parameters.traceMaxVal;
+    if (parameters.traceCClark>=0) TraceCClarkability=parameters.traceCClark;
+    if (parameters.traceDrift>0)   TraceDrift=parameters.traceDrift;
+    if (parameters.traceSampleRatio>0) TraceSampleRatio=parameters.traceSampleRatio;
+    extern bool TraceFinalRemoval, TracePreRemove;
+    if (parameters.traceFinalRemoval>=0) TraceFinalRemoval=(parameters.traceFinalRemoval!=0);
+    if (parameters.tracePreRemove>=0)    TracePreRemove=(parameters.tracePreRemove!=0);
 
     typename vcg::tri::FieldSmoother<FieldTriMesh>::SmoothParam FieldParam;
     FieldParam.alpha_curv=parameters.alpha_curv;
@@ -242,6 +257,37 @@ inline bool loadConfigFile(const std::string& filename, Parameters& parameters)
         parameters.remesh=false;
     else
         parameters.remesh=true;
+
+    // Optional -- aeltere Config-Dateien haben die Zeile nicht, dann
+    // bleibt es beim bisherigen Verhalten (Rand wird nicht geschont).
+    {
+        int TmpVar = 0;
+        if (fscanf(f,"keep_border %d\n",&TmpVar) == 1)
+            parameters.keepBorder = (TmpVar != 0);
+    }
+    {
+        int TmpVar = 0;
+        if (fscanf(f,"fix_feature_borders %d\n",&TmpVar) == 1)
+            parameters.fixFeatureBorders = (TmpVar != 0);
+    }
+    {
+        int TmpVar = -1;
+        if (fscanf(f,"patch_smooth %d\n",&TmpVar) == 1)
+            parameters.patchSmooth = TmpVar;
+    }
+    {
+        int A=-1,B=-1; float C=-1,D=-1,E=-1;
+        if (fscanf(f,"trace_minval %d\n",&A) == 1) parameters.traceMinVal=A;
+        if (fscanf(f,"trace_maxval %d\n",&B) == 1) parameters.traceMaxVal=B;
+        if (fscanf(f,"trace_cclark %f\n",&C) == 1) parameters.traceCClark=C;
+        if (fscanf(f,"trace_drift %f\n",&D) == 1) parameters.traceDrift=D;
+        if (fscanf(f,"trace_sampleratio %f\n",&E) == 1) parameters.traceSampleRatio=E;
+    }
+    {
+        int A2=-1,B2=-1;
+        if (fscanf(f,"trace_final_removal %d\n",&A2) == 1) parameters.traceFinalRemoval=A2;
+        if (fscanf(f,"trace_pre_remove %d\n",&B2) == 1) parameters.tracePreRemove=B2;
+    }
 
     fscanf(f,"sharp_feature_thr %f\n",&parameters.sharpAngle);
 

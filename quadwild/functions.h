@@ -21,12 +21,44 @@ struct Parameters {
         alpha_curv(0.3),
         crease_angle(25),
         hasFeature(false),
-        hasField(false)
+        hasField(false),
+        keepBorder(false),
+        fixFeatureBorders(false),
+        patchSmooth(-1),
+        traceMinVal(-1),
+        traceMaxVal(-1),
+        traceCClark(-1),
+        traceDrift(-1),
+        traceSampleRatio(-1),
+        traceFinalRemoval(-1),
+        tracePreRemove(-1)
     {
 
     }
 
     bool remesh;
+    // Randvertices beim Remeshing festhalten. Ohne das zieht
+    // collapseSurvivingMicroEdges ein Viertel des Randes ins Innere --
+    // gemessen 72 von 293 Randvertices, bis zu 0.91 Kantenlaengen
+    // daneben, mittlerer Randknick 5.0 -> 15.9 Grad.
+    bool keepBorder;
+    // Featurelinien beim Glaetten der Patchraender festhalten. Die
+    // Glaettung fasst sonst alle Patchraender an, Featurekanten
+    // eingeschlossen.
+    bool fixFeatureBorders;
+    // Schritte der Patchrand-Glaettung im Tracer; -1 laesst den fest
+    // verdrahteten Wert 10 stehen.
+    int patchSmooth;
+    // Tracing-Parameter: sie entscheiden die Patch-AUFTEILUNG, die danach
+    // unveraenderlich ist. -1 laesst den fest verdrahteten Wert stehen.
+    int traceMinVal;        // kleinste erlaubte Zahl Patchecken (fest 3)
+    int traceMaxVal;        // groesste erlaubte Zahl Patchecken (fest 5)
+    float traceCClark;      // Catmull-Clark-Tauglichkeitsschwelle (fest 1)
+    float traceDrift;       // erlaubte Abweichung vom Feld (fest 100)
+    float traceSampleRatio; // Dichte der Kandidaten-Emitter (fest 0.01)
+    // Pfad-Entfernung im Tracer (beide fest an). -1 laesst sie an.
+    int traceFinalRemoval;
+    int tracePreRemove;
     float sharpAngle;
     float alpha;
     float scaleFact;

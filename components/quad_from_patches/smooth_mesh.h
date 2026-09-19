@@ -26,6 +26,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef SMOOTH_MESH_H
 #define SMOOTH_MESH_H
 
+#include <algorithm>
+#include <limits>
 #include <vector>
 #include <vcg/complex/algorithms/polygonal_algorithms.h>
 #include <wrap/io_trimesh/export.h>
@@ -994,6 +996,127 @@ void DeCostrainFace(const PolyMeshType &PolyM,
 }
 
 
+// ---------------------------------------------------------------------------
+// Faltenpruefung
+// ---------------------------------------------------------------------------
+//
+// MultiCostraintSmooth verschiebt jeden Vertex bedingungslos -- weder
+// SmoothSharpFeatures noch SmoothInternal pruefen, ob dabei ein Viereck
+// umklappt. Gemessen an der Sickenplatte (scale 3, alpha2 0.18): die
+// Quadrangulierung geht mit NULL Bowties und 5 nicht-konvexen Vierecken
+// in diese Stufe hinein und kommt mit SECHS Bowties und einem
+// nicht-konvexen heraus. Die Vertex- und Facettenzahl ist davor und
+// danach identisch, es werden also nur Positionen verschoben: das
+// Glaetten zieht die nicht-konvexen Vierecke durch, bis sie kippen.
+//
+// NumReflex zaehlt je Facette die Ecken, deren Umlaufsinn dem der
+// Facette widerspricht. Ein konvexes Viereck hat 0, ein nicht-konvexes
+// 1, ein Bowtie 2. Gezaehlt wird gegen die Newell-Normale, die auch bei
+// nicht ebenen Vierecken definiert ist -- das gewoehnliche Kreuzprodukt
+// zweier Kanten ist es bei einem gefalteten Viereck nicht.
+
+template <class PolyMeshType>
+int NumReflex(const PolyMeshType &PolyM, const size_t IndexF)
+{
+    typedef typename PolyMeshType::CoordType CoordType;
+    typedef typename PolyMeshType::ScalarType ScalarType;
+
+    const int n = PolyM.face[IndexF].VN();
+    if (n < 3) return 0;
+
+    CoordType N(0, 0, 0);                       // Newell
+    for (int i = 0; i < n; i++)
+        N += PolyM.face[IndexF].cP(i) ^ PolyM.face[IndexF].cP((i + 1) % n);
+    ScalarType nn = N.Norm();
+    if (nn <= (ScalarType)0) return n;          // entartet: schlechtestmoeglich
+    N /= nn;
+
+    int bad = 0;
+    for (int i = 0; i < n; i++)
+    {
+        CoordType p0 = PolyM.face[IndexF].cP(i);
+        CoordType p1 = PolyM.face[IndexF].cP((i + 1) % n);
+        CoordType p2 = PolyM.face[IndexF].cP((i + 2) % n);
+        if ((((p1 - p0) ^ (p2 - p1)) * N) < (ScalarType)0) bad++;
+    }
+    return bad;
+}
+
+// Kuerzeste Kante einer Facette.
+template <class PolyMeshType>
+typename PolyMeshType::ScalarType MinEdge(const PolyMeshType &PolyM,
+                                          const size_t IndexF)
+{
+    typedef typename PolyMeshType::ScalarType ScalarType;
+    const int n = PolyM.face[IndexF].VN();
+    ScalarType m = std::numeric_limits<ScalarType>::max();
+    for (int i = 0; i < n; i++)
+        m = std::min(m, (PolyM.face[IndexF].cP((i + 1) % n) -
+                         PolyM.face[IndexF].cP(i)).Norm());
+    return m;
+}
+
+// Vertices, die eine Facette verschlechtert haben, auf ihre Position vor
+// dem Schritt zurueckziehen. Das geschieht NACH dem Schritt statt als
+// Bedingung davor: SmoothSharpFeatures und SmoothInternal bestehen aus
+// mehreren Teilschritten mit Rueckprojektion, und jeden davon einzeln zu
+// bewachen hiesse, sie umzuschreiben. Zurueckziehen wirkt auf beide.
+//
+// Iteriert, weil das Zurueckziehen eines Vertex eine NACHBARfacette
+// wieder verschlechtern kann. Der Bezugswert je Facette ist das Beste,
+// was sie bisher hatte -- eine Verbesserung wird also festgehalten und
+// nicht in einer spaeteren Iteration wieder verspielt.
+// ZWEI KRITERIEN, NICHT NUR EINES.
+//
+// NumReflex allein genuegt nicht: es bewacht den UMLAUFSINN. Ein Viereck
+// flachzudruecken aendert den nicht -- es bleibt konvex, bis es gar keine
+// Flaeche mehr hat. Gemessen an der Sickenplatte (scale 3, keepBorder,
+// Faltenpruefung an): zwei Vierecke am Rand gehen mit Seitenverhaeltnis
+// 3.2 und 2.0 und kuerzester Kante 2.79 bzw. 2.26 Kantenlaengen in die
+// Glaettung und kommen mit Verhaeltnis 72.2 und 68.7 und kuerzester Kante
+// 0.104 bzw. 0.113 Kantenlaengen heraus -- ein Zehntel einer
+// Dreieckskante. Bowties sind es nicht, die Pruefung liess sie durch.
+//
+// Deshalb zusaetzlich eine Mindestkantenlaenge je Facette: RefLen. Sie
+// ist das Minimum aus einem festen Anteil der Zielkantenlaenge und dem,
+// was die Facette schon hatte -- eine Facette, die von Anfang an kurze
+// Kanten hat (an einer Kreuzung etwa), wird also nicht kuenstlich
+// aufgeblasen, darf aber auch nicht noch kuerzer werden.
+template <class PolyMeshType>
+size_t RevertFolds(PolyMeshType &PolyM,
+                   const std::vector<typename PolyMeshType::CoordType> &PosVorher,
+                   std::vector<int> &RefBad,
+                   const std::vector<typename PolyMeshType::ScalarType> &RefLen,
+                   const size_t MaxLoops = 8)
+{
+    size_t reverted = 0;
+    for (size_t loop = 0; loop < MaxLoops; loop++)
+    {
+        bool changed = false;
+        for (size_t f = 0; f < PolyM.face.size(); f++)
+        {
+            if (PolyM.face[f].IsD()) continue;
+            const bool gefaltet = (NumReflex(PolyM, f) > RefBad[f]);
+            const bool platt    = (MinEdge(PolyM, f) < RefLen[f]);
+            if (!gefaltet && !platt) continue;
+            for (int i = 0; i < PolyM.face[f].VN(); i++)
+            {
+                size_t IndexV = vcg::tri::Index(PolyM, PolyM.face[f].V(i));
+                if (PolyM.vert[IndexV].P() == PosVorher[IndexV]) continue;
+                PolyM.vert[IndexV].P() = PosVorher[IndexV];
+                reverted++;
+            }
+            changed = true;
+        }
+        if (!changed) break;
+    }
+    for (size_t f = 0; f < PolyM.face.size(); f++)
+        if (!PolyM.face[f].IsD())
+            RefBad[f] = std::min(RefBad[f], NumReflex(PolyM, f));
+    return reverted;
+}
+
+
 template <class PolyMeshType,class TriMeshType>
 void MultiCostraintSmooth(PolyMeshType &PolyM,
                           TriMeshType &TriM,
@@ -1006,7 +1129,9 @@ void MultiCostraintSmooth(PolyMeshType &PolyM,
                           const typename PolyMeshType::ScalarType Damp,
                           const typename PolyMeshType::ScalarType AvEdge,
                           size_t step_num,
-                          size_t back_proj_steps)
+                          size_t back_proj_steps,
+                          bool fold_guard=false,
+                          typename PolyMeshType::ScalarType min_edge_frac=0.25)
 {
     typedef typename PolyMeshType::ScalarType ScalarType;
     typedef typename PolyMeshType::CoordType CoordType;
@@ -1031,8 +1156,36 @@ void MultiCostraintSmooth(PolyMeshType &PolyM,
     BB.Offset(BB.Diag()*0.1);
     TriGrid.Set(TriM.face.begin(),TriM.face.end(),BB);
 
+    std::vector<int> RefBad;
+    std::vector<ScalarType> RefLen;
+    std::vector<CoordType> PosVorher;
+    size_t reverted_ges=0;
+    const ScalarType MinEdgeFrac=min_edge_frac;
+    if (fold_guard)
+    {
+        RefBad.resize(PolyM.face.size());
+        RefLen.resize(PolyM.face.size());
+        for (size_t f=0;f<PolyM.face.size();f++)
+        {
+            if (PolyM.face[f].IsD()) { RefBad[f]=0; RefLen[f]=0; continue; }
+            RefBad[f]=NumReflex(PolyM,f);
+            RefLen[f]=std::min(AvEdge*MinEdgeFrac,MinEdge(PolyM,f));
+        }
+        int summe=0;
+        for (size_t f=0;f<RefBad.size();f++) summe+=RefBad[f];
+        std::cout<<"*** Faltenpruefung an, "<<summe
+                 <<" widersprechende Ecken zu Beginn, Mindestkante "
+                 <<AvEdge*MinEdgeFrac<<" ***"<<std::endl;
+    }
+
     for (size_t s=0;s<step_num;s++)
     {
+        if (fold_guard)
+        {
+            PosVorher.resize(PolyM.vert.size());
+            for (size_t i=0;i<PolyM.vert.size();i++)
+                PosVorher[i]=PolyM.vert[i].P();
+        }
         //std::cout<<"Smoooth Feature step: "<<s<<std::endl;
         //int t0=clock();
         SmoothSharpFeatures<PolyMeshType,TriMeshType>(PolyM,PolyProjBase,EdgeM,Damp,BlockedV);
@@ -1045,10 +1198,31 @@ void MultiCostraintSmooth(PolyMeshType &PolyM,
                                                  TemplateFit,Damp,
                                                  BlockedV,true);
 
+        if (fold_guard)
+            reverted_ges+=RevertFolds(PolyM,PosVorher,RefBad,RefLen);
+
         //        int t2=clock();
         //        std::cout<<"Concluded Smoothing step TFeat:"<<t1-t0<<" TInternal:"<<t2-t1<<std::endl;
     }
 
+    if (fold_guard)
+    {
+        int summe=0; size_t zu_kurz=0;
+        ScalarType kuerzeste=std::numeric_limits<ScalarType>::max();
+        for (size_t f=0;f<PolyM.face.size();f++)
+            if (!PolyM.face[f].IsD())
+            {
+                summe+=NumReflex(PolyM,f);
+                const ScalarType e=MinEdge(PolyM,f);
+                kuerzeste=std::min(kuerzeste,e);
+                if (e<RefLen[f]) zu_kurz++;
+            }
+        std::cout<<"*** Faltenpruefung: "<<reverted_ges
+                 <<" Vertexverschiebungen zurueckgenommen, "<<summe
+                 <<" widersprechende Ecken am Ende, kuerzeste Kante "
+                 <<kuerzeste<<" ("<<zu_kurz<<" Facetten unter ihrer Schranke) ***"
+                 <<std::endl;
+    }
 }
 
 

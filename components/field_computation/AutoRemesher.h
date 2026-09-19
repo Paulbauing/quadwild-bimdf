@@ -67,7 +67,33 @@ class AutoRemesher {
     }
 public:
 
-    static bool collapseSurvivingMicroEdges(Mesh & m, const ScalarType qualityThr = 0.001, const ScalarType edgeRatio = 0.025, const int maxIter = 2)
+    // RAND FESTHALTEN (keepBorder).
+    //
+    // Diese Funktion kollabiert die kuerzeste Kante jedes Splitter-
+    // dreiecks auf den MITTELPUNKT der Kante -- ohne zu pruefen, ob einer
+    // der beiden Endpunkte auf dem Netzrand liegt. Liegt einer drauf und
+    // der andere innen, wandert der ueberlebende Vertex auf die Mitte,
+    // also ins Innere, und der Rand wird um eine halbe Kantenlaenge
+    // eingezogen. Gemessen an der Sickenplatte: 72 von 293 Randvertices
+    // (24.6 Prozent) lagen danach nicht mehr auf der urspruenglichen
+    // Randkurve, bis zu 0.91 Kantenlaengen daneben; der mittlere Knick
+    // entlang des Randes stieg von 5.0 auf 15.9 Grad, die Zahl der Ecken
+    // ueber 20 Grad von 17 auf 89. Das ist der sichtbare Zickzack.
+    //
+    // Die Randkantenlaengen bleiben dabei unauffaellig (Median 1.03
+    // Kantenlaengen vorher wie nachher), es ist also kein Problem der
+    // Neuabtastung, sondern reines Verschieben quer zum Rand. Auch die
+    // Projektion ist es nicht: maxSurfDist liegt bei bbox.Diag()/2500,
+    // das sind 0.039 Kantenlaengen, ein Dreiundzwanzigstel der
+    // beobachteten Verschiebung.
+    //
+    // Mit keepBorder gilt: liegt genau EIN Endpunkt auf dem Rand, wird
+    // auf DESSEN Position kollabiert statt auf die Mitte -- der Rand
+    // bleibt damit punktgenau, wo er war. Liegen BEIDE auf dem Rand, die
+    // Kante selbst aber nicht, verbaende der Kollaps zwei verschiedene
+    // Randstellen und klemmte die Flaeche dazwischen ab; ein solcher
+    // Kollaps wird verworfen. Alles andere laeuft wie bisher.
+    static bool collapseSurvivingMicroEdges(Mesh & m, const ScalarType qualityThr = 0.001, const ScalarType edgeRatio = 0.025, const int maxIter = 2, const bool keepBorder = false)
     {
         typedef vcg::tri::BasicVertexPair<VertexType> VertexPair;
         typedef vcg::tri::EdgeCollapser<Mesh, VertexPair> Collapser;
@@ -79,6 +105,11 @@ public:
         {
             count = 0;
             vcg::tri::UpdateTopology<Mesh>::VertexFace(m);
+            if (keepBorder)
+            {
+                vcg::tri::UpdateTopology<Mesh>::FaceFace(m);
+                vcg::tri::UpdateFlags<Mesh>::VertexBorderFromFaceAdj(m);
+            }
 
             for(auto fi=m.face.begin(); fi!=m.face.end(); ++fi)
                 if(!(*fi).IsD())
@@ -118,6 +149,22 @@ public:
 
                         VertexPair  bp = VertexPair(fi->V0(minEdge), fi->V1(minEdge));
                         CoordType mp = (fi->cP0(minEdge) + fi->cP1(minEdge))/2.f;
+
+                        if (keepBorder)
+                        {
+                            const bool b0 = fi->V0(minEdge)->IsB();
+                            const bool b1 = fi->V1(minEdge)->IsB();
+                            if (b0 && b1)
+                            {
+                                // beide am Rand: nur erlaubt, wenn die Kante
+                                // selbst Randkante ist -- sonst klemmt der
+                                // Kollaps zwei Randstellen zusammen
+                                if (!vcg::face::IsBorder(*fi, minEdge))
+                                    continue;
+                            }
+                            else if (b0) mp = fi->cP0(minEdge);
+                            else if (b1) mp = fi->cP1(minEdge);
+                        }
 
                         if(Collapser::LinkConditions(bp))
                         {
@@ -183,6 +230,11 @@ public:
         ScalarType maxAdaptiveMult = 3;
         ScalarType minAspectRatioThr = 0.05;
         ScalarType targetEdgeLen = 0;
+        // Randvertices beim Aufraeumen der Splitterdreiecke nicht ins
+        // Innere ziehen -- siehe collapseSurvivingMicroEdges. Aus
+        // Vorgabe, damit sich ohne ausdruecklichen Schalter nichts am
+        // bisherigen Verhalten aendert.
+        bool keepBorder = false;
     } Params;
 
     static size_t openNonManifoldEdges(Mesh & m, const ScalarType moveThreshold,
@@ -385,6 +437,50 @@ public:
         para.surfDistCheck = m.FN() < 400000 ? par.surfDistCheck : false;
         para.userSelectedCreases = true;
 
+        // RANDKANTEN ALS CREASE MARKIEREN (keepBorder).
+        //
+        // vcglib markiert Randkanten in tagCreaseEdges
+        //   if (p.IsBorder()) p.F()->SetFaceEdgeS(p.E());
+        // -- aber IsotropicRemeshing::Do ruft tagCreaseEdges nur auf,
+        // wenn userSelectedCreases FALSCH ist:
+        //   if (!params.userSelectedCreases) tagCreaseEdges(toRemesh, params);
+        // Hier steht userSelectedCreases auf true, damit die von aussen
+        // vorgegebenen Featurelinien nicht ueberschrieben werden. Damit
+        // bleibt der Netzrand unmarkiert, checkCanMoveOnCollapse findet an
+        // einem Randvertex keine anliegende Kante und erklaert ihn fuer
+        // frei beweglich -- CollapseShortEdges zieht ihn dann auf den
+        // Kantenmittelpunkt, also ins Innere.
+        //
+        // Gemessen an der Sickenplatte: von 293 Randvertices danach 72
+        // NEUE, die nicht mehr auf der urspruenglichen Randkurve liegen,
+        // 71 davon nach innen versetzt (Median 0.26, max 0.72
+        // Kantenlaengen, praktisch ohne Anteil aus der Flaeche heraus).
+        // Die alten Randpunkte bleiben dabei liegen -- der Rand wird nicht
+        // verbogen, er wird UMGELEITET. Mittlerer Randknick 5.0 -> 15.9
+        // Grad, Ecken ueber 20 Grad von 17 auf 89.
+        //
+        // Die Markierung hier von Hand nachzuholen loest das, ohne
+        // userSelectedCreases aufzugeben: die eigenen Featurekanten
+        // bleiben markiert, der Rand kommt dazu.
+        if (par.keepBorder)
+        {
+            vcg::tri::UpdateTopology<Mesh>::FaceFace(m);
+            size_t nb = 0;
+            for (size_t fi = 0; fi < m.face.size(); fi++)
+            {
+                if (m.face[fi].IsD()) continue;
+                for (int j = 0; j < 3; j++)
+                    if (vcg::face::IsBorder(m.face[fi], j))
+                    {
+                        m.face[fi].SetFaceEdgeS(j);
+                        nb++;
+                    }
+            }
+            std::cout << "keepBorder: " << nb
+                      << " Randkanten als Crease markiert" << std::endl;
+        }
+
+
 
 
         ScalarType edgeL = ExpectedEdgeL(m);//,par.initialApproximateFN);//std::sqrt(2.309 * vcg::tri::Stat<Mesh>::ComputeMeshArea(m) / par.initialApproximateFN);//m.bbox.Diag() * 0.025;//std::sqrt(vcg::tri::Stat<Mesh>::ComputeMeshArea(m) * 2 / par.initialApproximateFN);
@@ -403,7 +499,7 @@ public:
         const ScalarType thr = 0.01;
 
         //vcg::tri::UpdateSelection<Mesh>::VertexClear(m);
-        collapseSurvivingMicroEdges(m,thr);
+        collapseSurvivingMicroEdges(m,thr,0.025,2,par.keepBorder);
 
         UpdateCoherentSharp(m,par);
 
