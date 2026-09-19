@@ -33,15 +33,27 @@ RUNS="${QW_RUNS:-$REPO/runs}"
 EVAL_DIR="${QW_SRC:-${QW_EVAL:-$HOME/dev/masterarbeit/src}}"
 PYTHON="$EVAL_DIR/.venv/bin/python"
 
+# Laeufe liegen nach Eingabenetz gruppiert: runs/<netz>/<parameter>/.
+# Ohne Argument werden die Netze aufgezaehlt, mit einem Netznamen dessen
+# Laeufe -- sonst waere die Liste bei ueber hundert Laeufen unlesbar.
 list_runs() {
-    echo "Verfuegbare Laeufe unter $RUNS:" >&2
-    if [ -d "$RUNS" ]; then
-        for d in "$RUNS"/*/; do
-            [ -d "$d" ] && echo "  $(basename "$d")" >&2
-        done
-    else
-        echo "  (Verzeichnis existiert nicht)" >&2
+    if [ ! -d "$RUNS" ]; then
+        echo "  (Verzeichnis $RUNS existiert nicht)" >&2
+        return
     fi
+    if [ -n "${1:-}" ] && [ -d "$RUNS/$1" ]; then
+        echo "Laeufe zu '$1':" >&2
+        for d in "$RUNS/$1"/*/; do
+            [ -d "$d" ] && echo "  $1/$(basename "$d")" >&2
+        done
+        return
+    fi
+    echo "Eingabenetze unter $RUNS (Aufruf: view_run.sh <netz>/<parameter>):" >&2
+    for d in "$RUNS"/*/; do
+        [ -d "$d" ] || continue
+        n=$(find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d " ")
+        printf "  %-56s %3s Laeufe\n" "$(basename "$d")" "$n" >&2
+    done
 }
 
 if [ $# -eq 0 ]; then
@@ -52,14 +64,24 @@ fi
 run_name="$1"; shift
 run_dir="$RUNS/$run_name"
 
+# Nur ein Netzname angegeben: dessen Laeufe auflisten statt zu scheitern.
+if [ -d "$run_dir" ] && [ ! -d "$run_dir/output" ]; then
+    list_runs "$run_name"
+    exit 0
+fi
+
 if [ ! -d "$run_dir" ]; then
     echo "view_run.sh: '$run_name' nicht gefunden unter $RUNS" >&2
     echo >&2
-    list_runs
+    list_runs "${run_name%%/*}"
     exit 1
 fi
 
-result="$run_dir/output/${run_name}.obj"
+# Das Endergebnis traegt Netz- und Parameternamen; der Ordner nur noch
+# den Parameternamen, weil das Netz die Ebene darueber ist.
+in_stem="$(basename "$(dirname "$run_dir")")"
+result="$run_dir/output/${in_stem}__$(basename "$run_dir").obj"
+[ -f "$result" ] || result="$run_dir/output/$(basename "$run_dir").obj"
 if [ ! -f "$result" ]; then
     echo "view_run.sh: kein Endergebnis '$result' gefunden -- ist der Lauf" >&2
     echo "vollstaendig durchgelaufen?" >&2
@@ -94,9 +116,13 @@ if [ "$want_field" = 1 ]; then
 fi
 
 if [ "$want_ref" = 1 ]; then
+    # input/ gibt es nur noch dort, wo die Datei sonst nirgends liegt --
+    # die uebrigen Kopien sind entfallen, weil sie bitgleich in sources/
+    # stehen. Deshalb dort nachsehen, wenn input/ fehlt.
     ref=$(find "$run_dir/input" -maxdepth 1 -type f ! -iname "*.sharp" 2>/dev/null | head -1)
+    [ -n "$ref" ] || ref=$(ls "$REPO/sources/$in_stem".obj 2>/dev/null | head -1)
     if [ -z "$ref" ]; then
-        echo "view_run.sh: keine Eingabedatei in $run_dir/input gefunden." >&2
+        echo "view_run.sh: keine Eingabe zu '$in_stem' gefunden." >&2
     else
         case "$ref" in
             *.obj|*.off) args+=(--ref "$ref") ;;

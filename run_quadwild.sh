@@ -290,13 +290,17 @@ if [ -n "$sharp_file" ]; then
     fi
 fi
 
-run_name="$in_stem"
-[ -n "$tokens" ] && run_name="${in_stem}__${tokens}"
+# Laeufe liegen nach EINGABENETZ gruppiert: runs/<netz>/<parameter>/.
+# Frueher lagen sie flach nebeneinander, und der Netzname stand im
+# Ordnernamen -- bei ueber hundert Laeufen war das nicht mehr zu
+# ueberblicken, und "alle Laeufe zu diesem Netz" war eine Musterabfrage
+# statt ein Verzeichnis.
+run_name="${tokens:-standard}"
 [ -n "$tag" ] && run_name="${run_name}__${tag}"
 
-run_dir="$RUNS/$run_name"
+run_dir="$RUNS/$in_stem/$run_name"
 if [ -d "$run_dir" ]; then
-    echo "run_quadwild.sh: '$run_name' existiert schon, wird ueberschrieben."
+    echo "run_quadwild.sh: '$in_stem/$run_name' existiert schon, wird ueberschrieben."
 fi
 rm -rf "$run_dir"
 mkdir -p "$run_dir/input" "$run_dir/output"
@@ -490,7 +494,9 @@ fi
 # Ein klar benanntes Endergebnis zusaetzlich zu den QuadWild-eigenen
 # Suffixnamen -- das .mtl daneben bleibt unter seinem alten Namen liegen
 # und wird trotzdem gefunden (gleiches Verzeichnis, relativer mtllib-Pfad).
-final="$run_dir/output/${run_name}.obj"
+# Der Netzname gehoert in den Dateinamen, auch wenn er jetzt schon im
+# Ordner steht: eine einzeln herauskopierte Datei soll zuzuordnen sein.
+final="$run_dir/output/${in_stem}__${run_name}.obj"
 cp "$result" "$final"
 
 echo

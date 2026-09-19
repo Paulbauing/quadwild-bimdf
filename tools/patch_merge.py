@@ -47,6 +47,14 @@ Dreieck zusammen. Gemessen ohne diesen Schritt: 4 Zwerge verschmolzen,
 dafuer die irregulaeren Vertices von 47 auf 65 und acht nicht-konvexe
 Vierecke, wo vorher keines war -- ein Verlustgeschaeft.
 
+OBERGRENZE. Ein Merge, der mehr als max_corners Ecken hinterlaesst, wird
+verworfen statt ausgefuehrt. Die Grenze ist nicht frei gewaehlt: Bi-MDF
+akzeptiert in qr_singularity_pairs.cpp die Valenzen 3, 4, 5 und 6 und
+wirft sonst "weird patch valence". Ohne diese Pruefung entstanden an
+einem Netz mit 309 Patches zwei mit acht und zwei mit neun Ecken, und
+der Lauf brach in Stufe 2 ab -- die Knickpruefung strich dort nichts,
+weil alle neun Ecken einen echten Knick ueber 45 Grad hatten.
+
 UNTERGRENZE. Gestrichen wird nur, solange genug Ecken uebrig bleiben.
 Ohne diese Bremse kam ein verschmolzener Patch mit NULL Ecken heraus --
 sein Rand lief nach dem Merge ueberall glatt durch, also fiel jede
@@ -224,7 +232,7 @@ def patch_rand(ef, patch, menge):
 
 
 def merge(prefix, min_area, scale, corner_angle=45.0, min_inradius=0.0,
-          min_corners=4, verbose=True):
+          min_corners=4, max_corners=6, verbose=True):
     prefix = Path(prefix)
     sh = load_obj(str(prefix.with_suffix(".obj")))
     V, F = sh["vertices"], sh["faces"]
@@ -302,6 +310,12 @@ def merge(prefix, min_area, scale, corner_angle=45.0, min_inradius=0.0,
         kand = sorted((set(corners[p]) | set(corners[ziel])) & rand)
         nb = rand_nachbarn(ef, menge)
         neu = ecken_waehlen(V, nb, kand, corner_angle, min_corners)
+        if len(neu) > max_corners:
+            if verbose:
+                print(f"   Patch {p} ({A[p]:.2f} Q^2, Inradius {inradius[p]:.2f} Q): "
+                      f"ergaebe {len(neu)} Ecken (hoechstens {max_corners}) "
+                      f"-- uebersprungen")
+            continue
         if verbose:
             print(f"   Patch {p} ({A[p]:.2f} Q^2, Inradius {inradius[p]:.2f} Q, "
                   f"{int((patch == p).sum())} Dreiecke) -> Patch {ziel}; "
@@ -354,13 +368,18 @@ def main(argv=None):
                    help="so viele Ecken behaelt ein verschmolzener Patch "
                         "mindestens, auch wenn sein Rand glatt durchlaeuft. "
                         "Unter 3 kann Stufe 2 nicht quantisieren.")
+    p.add_argument("--max-corners", type=int, default=6, metavar="N",
+                   help="Merges verwerfen, die mehr Ecken hinterlassen. "
+                        "6 ist die Grenze von Bi-MDF (qr_singularity_pairs.cpp "
+                        "akzeptiert 3, 4, 5, 6 und wirft sonst 'weird patch "
+                        "valence'). Hoeher setzen laesst Laeufe abbrechen.")
     p.add_argument("--dry-run", action="store_true",
                    help="nur rechnen, nichts schreiben")
     args = p.parse_args(argv)
 
     patch, corners, n = merge(args.prefix, args.min_area, args.scale,
                               args.corner_angle, args.min_inradius,
-                              args.min_corners)
+                              args.min_corners, args.max_corners)
     if n == 0 or args.dry_run:
         if args.dry_run:
             print("(--dry-run, nichts geschrieben)")
