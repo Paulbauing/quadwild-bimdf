@@ -450,8 +450,10 @@ fi
 # Grenze, die Featurelinien bleiben also unangetastet.
 if [ -n "$merge_patches" ] || [ -n "$merge_inradius" ]; then
     [ -n "$merge_patches" ] || merge_patches=0
-    merge_py="$REPO/../Evaluation/patch_merge.py"
-    merge_bin="$REPO/../Evaluation/.venv/bin/python"
+    # patch_merge.py liegt seit dem Paketumbau unter quadwild/ statt flach.
+    merge_wurzel="$REPO/../Evaluation"
+    merge_py="$merge_wurzel/quadwild/patch_merge.py"
+    merge_bin="$merge_wurzel/.venv/bin/python"
     [ -x "$merge_bin" ] || merge_bin="python3"
     if [ -f "$merge_py" ]; then
         {
