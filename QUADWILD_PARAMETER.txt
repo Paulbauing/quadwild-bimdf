@@ -1,0 +1,321 @@
+================================================================================
+QUADWILD-STUFE -- PARAMETERSTUDIE
+================================================================================
+
+Stand: 2026-09-20
+Werkzeug: quadwild-bimdf/run_quadwild.sh
+Eingabe:  je Platte EIN festes Featurenetz aus ridge_extend.py mit den
+          Vorgaben aus src/ridges/PARAMETER.txt (0 freie Enden, 3 Linien):
+            data/features_split/bead_plate_tria2_remeshed/
+                bead_plate_tria2_remeshed_std.obj/.sharp
+            data/features_split/plate_result_175_tria_newremesh/
+                plate_result_175_tria_newremesh_std.obj/.sharp
+Umfang:   42 Laeufe, je rund 44 Sekunden.
+
+
+--------------------------------------------------------------------------------
+0. ZUERST: EIN FEHLER IM TREIBER, DER AELTERE LAEUFE BETRIFFT
+--------------------------------------------------------------------------------
+
+Der Block, der die Stufe-2-Config patcht, stand vollstaendig unter
+
+    if [ "$scale_set" = 1 ] || [ "$alpha2_set" = 1 ]; then
+
+und DARIN stehen chartSmoothingIterations,
+quadrangulationFixed/NonFixedSmoothingIterations, finalSmoothSteps,
+finalSmoothFoldGuard und finalSmoothMinEdge.
+
+Folge: -foldguard, -minedge, -chartsmooth, -finalsmooth, -quadsmooth und
+-quadsmoothfree erreichten die Config NUR, wenn nebenbei -scale oder
+-alpha2 gesetzt war. Im ersten Durchgang dieser Studie lieferten deshalb
+elf von sechzehn Varianten Zahl fuer Zahl identische Ergebnisse.
+
+Das betrifft auch AELTERE Laeufe dieser Arbeit: jeder Lauf ohne -scale
+und ohne -alpha2 hatte weder Foldguard noch Mindestkantenlaenge aktiv,
+obwohl die Flags gesetzt waren und die Ordnernamen "fg" und "me0.5"
+tragen. Die Ordnernamen behaupten dort etwas, das nicht stattgefunden hat.
+
+Nebenwirkung, die das Bild lange verzerrt hat: -alpha2 wirkte doppelt --
+es setzte alpha UND schaltete alle uebrigen Parameter erst scharf.
+
+Behoben: der Block laeuft jetzt immer; scaleFact und alpha werden
+weiterhin nur bei explizitem -scale/-alpha2 gesetzt.
+
+
+--------------------------------------------------------------------------------
+1. ZIELGROESSEN
+--------------------------------------------------------------------------------
+
+  Bowties, nicht-konvexe Quads   MUESSEN 0 sein (Ausschlusskriterium)
+  Winkel unter 20 Grad           Hauptkriterium der Elementguete
+  schlechtester Winkel           Warnsignal, einzelnes Element
+  Seitenverhaeltnis, Quads > 5   Streckung
+  Feature-Abstand p90            WICHTIG: misst, ob die Quads den
+                                 Featurelinien noch folgen. Ohne diese
+                                 Spalte gewinnen Varianten, die einfach
+                                 die Features verlassen (siehe 3.)
+  irregulaere Knoten             Singularitaeten insgesamt
+  Randknick                      nur 175er-Platte auffaellig (1.68)
+
+  Verdrehung der Mitte (Abschnitt 4):
+    n        Singularitaeten in der Scheibe des Mittelkreises
+    dWinkel  groesste Abweichung ihrer Winkelabstaende von 360/n
+    sRadius  Streuung ihrer Radien
+
+
+--------------------------------------------------------------------------------
+2. ERGEBNIS: -alpha2 IST DER EINZIGE PARAMETER MIT ECHTEM GEWINN
+--------------------------------------------------------------------------------
+
+VORGABE: -alpha2 0.15
+
+ACHTUNG, KORREKTUR: die erste Fassung dieses Abschnitts empfahl 0.01.
+Diese Empfehlung war zu eng gemessen -- der Sweep lief AUSSCHLIESSLICH
+bei scale 1. Dort passen die randnahen Baender bequem, und alpha2 zeigt
+nur seine Schattenseite (mehr irregulaere Knoten). Dass der Parameter
+bei groben Auflösungen ueber brauchbar und kaputt entscheidet, konnte
+die Messreihe gar nicht sehen.
+
+DER PARAMETER IST MIT DER ZIELKANTENLAENGE GEKOPPELT. Gemessen auf der
+Sickenplatte, gleiches Featurenetz, nur alpha2 variiert:
+
+    scale 4    alpha2   nk   Verh   >5   Wink   <20   irr
+               0.01      2   10.8   10    7.3    17    36
+               0.05      1    4.3    0   17.2     2    42
+               0.15      1    5.4    2   17.4     1    66
+
+    scale 6    alpha2   nk   Verh   >5   Wink   <20   irr
+               0.01      7   11.9   51    1.0   118    36
+               0.05      3   11.5   39    6.6    97    38
+               0.15      0    6.6    3   19.4     2    50
+
+Bei scale 6 beseitigt 0.15 die nicht-konvexen Vierecke VOLLSTAENDIG,
+senkt das Seitenverhaeltnis von 11.9 auf 6.6, die gestreckten Quads von
+51 auf 3 und die Winkel unter 20 Grad von 118 auf 2.
+
+Damit ist auch die Bandbreiten-Grenze aus Abschnitt 5a keine harte
+Schranke: mit genug Gewicht setzt der Loeser die Unterteilung im schmalen
+Band durch, statt sie zu Splittern zu quetschen.
+
+WAS 0.15 KOSTET, bei FEINER Auflösung:
+
+    Sickenplatte scale 1   irregulaere Knoten  44 -> 88
+                           Singularitaeten Mitte 4 -> 6 (siehe 4.)
+                           Verdrehung dWinkel  24.9 -> 52.2 Grad
+                           dafuer Winkel unter 20 Grad 12 -> 3
+                           und Feature-Abstand 0.0118 -> 0.0109
+    175er-Platte scale 1   irregulaere Knoten  58 -> 97
+                           Singularitaeten Mitte bleiben 4
+                           Verdrehung dWinkel  39.0 -> 29.6 Grad (besser)
+
+Die Vorgabe irrt bewusst in die sichere Richtung: ein Netz mit mehr
+Singularitaeten ist brauchbar, eines mit umgeklappten Vierecken nicht.
+
+WER FEIN RECHNET (scale 1 bis 2) und auf wenige Singularitaeten Wert
+legt, setzt -alpha2 0.01. Auf der 175er-Platte fallen dort die Winkel
+unter 20 Grad von 35 auf 2 bei unveraenderter Zahl irregulaerer Knoten.
+
+-alpha2 0.05 ist bei scale 1 ein Ausreisser nach unten und dort nicht zu
+verwenden: Seitenverhaeltnis 22.8, schlechtester Winkel 1.7 Grad, 80
+Winkel unter 20 Grad (175er-Platte). Bei groben Auflösungen liegt es
+zwischen 0.01 und 0.15, ohne deren Vorteile zu erreichen.
+
+
+--------------------------------------------------------------------------------
+3. DIE FALLE: -quadsmooth UND -quadsmoothfree
+--------------------------------------------------------------------------------
+
+Beide liefern mit Abstand die besten Elementkennzahlen:
+
+    Sickenplatte   schlechtester Winkel 22.8, kein Winkel unter 20
+    175er-Platte   schlechtester Winkel 30.6, Seitenverhaeltnis 3.9,
+                   kein Quad ueber 5, kein Winkel unter 20
+
+Und zugleich den schlechtesten Feature-Abstand der ganzen Studie:
+
+    Sickenplatte   0.0119 -> 0.1530   (13-fach)
+    175er-Platte   0.0367 -> 0.2972   ( 8-fach)
+
+Die Quads folgen den Featurelinien dann nicht mehr -- die Glaettung zieht
+sie von den Kanten weg. Wer nur auf Winkel und Seitenverhaeltnis schaut,
+haelt das fuer den Gewinner der Studie. NICHT VERWENDEN, solange
+Feature-Treue das Ziel ist.
+
+
+--------------------------------------------------------------------------------
+4. WARUM DIE MITTE VERDREHT IST -- TOPOLOGISCH ERZWUNGEN
+--------------------------------------------------------------------------------
+
+Beide Platten tragen in der Mitte einen KREISRING aus zwei konzentrischen
+Featurekreisen (Sickenplatte r = 44.8 und 69.5; 175er r = 0.15 und 0.21).
+
+Ein Kreuzfeld muss an einer Featurelinie ausgerichtet sein. Laeuft man den
+inneren Kreis einmal ab, dreht sich die Tangentenrichtung um 360 Grad.
+Nach Poincaré-Hopf betraegt die Summe der Singularitaetsindizes in der
+eingeschlossenen Scheibe dann +1. Ein 4-RoSy-Feld hat Singularitaeten vom
+Index 1/4 -- es muessen also VIER darin liegen, im Quadnetz sichtbar als
+vier irregulaere Knoten.
+
+GEMESSEN, an einem Ergebnisnetz der 175er-Platte:
+
+    innere Scheibe r < 0.15     70 Knoten,  4 irregulaer (alle Valenz 3),
+                                Indexsumme +1.00
+    Ring 0.15 < r < 0.21        93 Knoten,  5 irregulaer, Indexsumme -0.25
+    ausserhalb r > 0.21        556 Knoten, 40 irregulaer, Indexsumme -0.50
+
+Die Indexsumme +1.00 in der Scheibe trat in praktisch JEDER Variante der
+Studie auf. Diese vier Knoten sind durch KEINEN Parameter zu entfernen.
+
+Der Ring zwischen den Kreisen ist ein Annulus mit Euler-Charakteristik 0,
+dort ist die Indexsumme 0 -- das Feld kann den Kreisen sauber folgen. Die
+Verdrehung ist deshalb auf die innere Scheibe beschraenkt.
+
+WAS VERDREHT AUSSIEHT, IST IHRE LAGE, NICHT IHRE EXISTENZ. Gemessen an
+einem Altlauf (alpha2 0.15):
+
+    Winkel:          229.9, 314.5, 71.8, 129.2 Grad
+    Winkelabstaende:  57.4, 100.7, 84.6, 117.3 Grad   (ideal 4 x 90)
+    Radien:          0.148, 0.128, 0.055, 0.125       (Kreis bei 0.15)
+
+Drei sitzen dicht am Featurekreis, der vierte faellt auf r = 0.055 nach
+innen. Die Quadreihen muessen sich um diesen ausgescherten Knoten
+herumwinden -- das ist der eingedrehte Eindruck.
+
+Ueber die ganze Studie liegt dWinkel zwischen 24 und 53 Grad; kein
+Parameter bringt die vier auch nur in die Naehe der Gleichverteilung.
+Das ist folgerichtig: die Lage bestimmt der Glaettungsterm, und der hat
+auf einer Platte mit unsymmetrischem Aussenmuster keinen Grund,
+ausgerechnet in der Mitte vierzaehlig zu werden.
+
+WER DIE MITTE WIRKLICH BERUHIGEN WILL, hat zwei Wege, und beide liegen
+ausserhalb der QuadWild-Parameter:
+
+  (a) alpha2 niedrig halten (0.005 bis 0.01). Dann bleiben es auf der
+      Sickenplatte vier statt sechs bis sieben Singularitaeten und
+      dWinkel 25 statt 52 Grad.
+
+  (b) Die Lage der vier VORGEBEN: vier kurze, symmetrisch gesetzte
+      Featurelinien, die radial von innen an den Kreis stossen. Das
+      zwingt die Singularitaeten an definierte Stellen und macht aus der
+      willkuerlichen Verdrehung ein vierzaehliges Muster. Ein Eingriff in
+      die Featurevorgabe (ridge_extend), nicht in QuadWild. NICHT
+      GEMESSEN -- Vorschlag, keine belegte Aussage.
+
+
+--------------------------------------------------------------------------------
+4a. WARUM GROBE NETZE ZERFALLEN -- UND AB WANN
+--------------------------------------------------------------------------------
+
+Bei grober Zielauflösung entstehen an den PLATTENECKEN umgeklappte
+Vierecke (Innenwinkel ueber 180 Grad). Gemessen an einem Lauf mit
+scale 6: zwei Quads mit den Winkeln (13.5, 120.6, 13.1, 214.7) und
+(15.4, 152.1, 11.7, 182.0), beide 0.05 bis 0.07 Plattenlaengen von der
+Ecke entfernt.
+
+URSACHE: eine randparallele Featurelinie laeuft rund 9 Einheiten vom
+Netzrand entfernt (etwa eine mediane Kantenlaenge des Eingangsnetzes).
+QuadWild muss in dieses Band mindestens EINE Quadreihe legen. Bei
+scale 6 ist die Zielkantenlaenge Q = 26 -- das Band misst 0.35 Q. An
+der Ecke treffen zwei solche Baender rechtwinklig aufeinander, deshalb
+sitzen die Defekte genau dort.
+
+SKALENREIHE, Sickenplatte, alpha2 0.01:
+
+    scale   Quads    nk   Verh   >5   Wink   <20   Feat90     Q   Band/Q
+      1     22217     0    3.6    0   11.6    12   0.0118   4.3    2.1
+      2      5957     0    4.0    0   17.2     2   0.0288   8.7    1.03
+      3      2786     0    8.4    8   14.1    40   0.0563  13.0    0.69
+      4      1687     2   10.8   10    7.3    17   0.0960  17.4    0.52
+      6       993     7   11.9   51    1.0   118   0.1595  26.0    0.35
+      8       676    14   13.3   86    1.7   104   0.2515  34.7    0.26
+
+Die Schwelle liegt scharf bei Band/Q = 1: bei scale 2 passt die
+Quadreihe gerade noch, ab scale 3 nicht mehr, ab scale 4 erscheinen die
+ersten umgeklappten Vierecke.
+
+MIT alpha2 0.15 VERSCHWINDET DER EFFEKT (siehe Abschnitt 2) -- die
+Grenze ist also keine geometrische Unmoeglichkeit, sondern eine Frage
+des Gewichts in der Quantisierung.
+
+NEBENBEFUNDE:
+  scale 2 ist in mehreren Kennzahlen BESSER als scale 1 (schlechtester
+  Winkel 17.2 statt 11.6, Winkel unter 20 Grad 2 statt 12, irregulaere
+  Knoten 36 statt 44) -- erkauft mit dem Feature-Abstand.
+
+  Die irregulaeren Knoten bleiben ueber alle Skalen bei 36. Sie haengen
+  an der Feature-Topologie, nicht an der Auflösung.
+
+  Die randnahe Featurelinie fuegt sachlich wenig hinzu: QuadWild
+  markiert Randkanten ohnehin als Feature und setzt align_borders fest
+  auf true. Sie aus der .sharp zu entfernen waere der Weg, der die
+  Ursache trifft -- NICHT GEMESSEN.
+
+
+--------------------------------------------------------------------------------
+5. DIE UEBRIGEN PARAMETER
+--------------------------------------------------------------------------------
+
+--alpha (Stufe 1)   0.005 und 0.02 liefern auf BEIDEN Platten Zahl fuer
+                    Zahl dieselben Ergebnisse wie die Vorgabe 0.01.
+                    Ohne Wirkung im geprueften Bereich.
+
+--finalsmooth       Vorgabe 30 ist richtig.
+                    0:  Sickenplatte Seitenverhaeltnis 7.0, 20 Quads ueber
+                        5, 116 Winkel unter 20, 6 nicht-konvexe Quads.
+                        175er: 152 Quads ueber 5, 145 Winkel unter 20.
+                    10: schlechter als 30 (Seitenverhaeltnis 5.5).
+                    60: kein Gewinn gegenueber 30.
+
+--chartsmooth       5 und 10 erzeugen NICHT-KONVEXE Quads (1 bzw. 2) und
+                    bei 5 auf der Sickenplatte einen Bowtie. Nicht
+                    verwenden; Vorgabe 0 beibehalten.
+
+--scale             Zielkonflikt, keine Optimierung. Feiner = besserer
+                    Feature-Abstand und Randknick, groeber = weniger
+                    Quads bei schlechteren Winkeln.
+                      Sickenplatte 1.0: 22629 Quads, Feat 0.0119
+                                   1.5: 10212 Quads, Feat 0.0193
+                                   2.0:  6095 Quads, Feat 0.0288
+                      175er        1.0:  6662 Quads, Randknick 1.68
+                                   1.5:  3310 Quads, Randknick 2.51,
+                                         Seitenverhaeltnis 13.1
+                                   2.0:  2179 Quads, Randknick 3.09,
+                                         schlechtester Winkel 2.8 Grad,
+                                         3 nicht-konvexe Quads
+                    Welche Aufloesung gebraucht wird, ist eine Vorgabe
+                    von aussen und keine Messfrage. scale 2 ist auf der
+                    175er-Platte unbrauchbar.
+
+--drift 0.5         SCHAEDLICH auf beiden Platten (im ersten Durchgang
+                    gemessen, vor der Treiberkorrektur, aber -drift
+                    greift an anderer Stelle und war daher gueltig):
+                      Sickenplatte Seitenverhaeltnis 3.8 -> 11.3,
+                        55 Quads ueber 5, 317 Winkel unter 20 statt 2
+                      175er        Seitenverhaeltnis 6.3 -> 16.5,
+                        170 Quads ueber 5 statt 101
+
+--mergepatches      0.3 ohne Wirkung; 0.5 aendert auf der 175er-Platte
+                    wenig (6662 -> 6709 Quads). Laeuft als Nachschritt
+                    ausserhalb der Config und war vom Treiberfehler nicht
+                    betroffen.
+
+
+--------------------------------------------------------------------------------
+6. EINSCHRAENKUNGEN
+--------------------------------------------------------------------------------
+
+Einzelparameter-Sweep um eine Basislinie, kein Gitter -- ein lokales
+Optimum. Die Basis war -foldguard -minedge 0.5 -keepborder.
+
+Die Basislaeufe des ERSTEN Durchgangs sind durch den Treiberfehler
+entwertet; gueltig blieben dort nur -scale, -drift und -mergepatches.
+Alle Zahlen in diesem Dokument stammen aus dem zweiten Durchgang, ausser
+den ausdruecklich als solche gekennzeichneten -drift-Werten.
+
+Zwei Netze, beide Blechteile mit Sicken und mittigem Kreisring. Die
+gegensaetzliche Wirkung von alpha2 auf den beiden Platten zeigt, dass
+diese Werte nicht ohne Pruefung auf andere Bauteile uebertragbar sind.
+
+Die Aussagen zur Verdrehung beruhen auf der Auswertung der irregulaeren
+Knoten im Ergebnisnetz, nicht auf dem Kreuzfeld (.rosy) selbst.
+================================================================================

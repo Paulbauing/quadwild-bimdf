@@ -123,6 +123,7 @@ usage() {
     echo "                     Glaettung alle Patchraender an, denn sie" >&2
     echo "                     erkennt sie an IsFaceEdgeS -- und das" >&2
     echo "                     markiert Featurekanten mit." >&2
+    echo "  -nokeepborder     Randkanten beim Remeshing NICHT halten (Vorgabe: halten)" >&2
     echo "  -keepborder        beim Remeshing den Netzrand festhalten." >&2
     echo "                     Ohne das zieht collapseSurvivingMicroEdges" >&2
     echo "                     Randvertices auf die Kantenmitte, also ins" >&2
@@ -152,6 +153,7 @@ usage() {
     echo "                     Zielkantenlaenge (Vorgabe 0.25). Greift nur" >&2
     echo "                     mit -foldguard. Zu klein laesst Vierecke am" >&2
     echo "                     Rand zusammendruecken." >&2
+    echo "  -nofoldguard      Faltungsschutz der Schlussglaettung AUS (Vorgabe: an)" >&2
     echo "  -foldguard         Faltenpruefung in der abschliessenden" >&2
     echo "                     Glaettung: eine Vertexverschiebung, die ein" >&2
     echo "                     Viereck nicht-konvex macht oder umklappt," >&2
@@ -191,10 +193,10 @@ add_token() {
 }
 
 in_mesh=""
-sharp_thr=35 alpha1=0.01 alpha2=0.005 alpha_curv=0.3 scale_fact=1 do_remesh=1
+sharp_thr=35 alpha1=0.01 alpha2=0.15 alpha_curv=0.3 scale_fact=1 do_remesh=1
 # Randvertices beim Remeshing festhalten (collapseSurvivingMicroEdges in
 # AutoRemesher.h). Aus Vorgabe = bisheriges Verhalten.
-keep_border=0 fix_features=0 patch_smooth=-1
+keep_border=1 fix_features=0 patch_smooth=-1
 trace_minval=-1 trace_maxval=-1 trace_cclark=-1 trace_drift=-1 trace_sampleratio=-1
 trace_final_removal=-1 trace_pre_remove=-1
 # Zwergpatches zwischen den beiden Stufen verschmelzen (patch_merge.py).
@@ -208,7 +210,7 @@ chart_smooth=0 quad_smooth_fixed=0 quad_smooth_free=0
 # Abschliessende Glaettung (MultiCostraintSmooth in main.cpp). Andere Stufe
 # als die drei obigen: die laufen in quadrangulationFromPatches, diese
 # danach. 30 Schritte ohne Faltenpruefung waren fest verdrahtet.
-final_smooth=30 fold_guard=0 min_edge=0.25
+final_smooth=30 fold_guard=1 min_edge=0.5
 crease_angle=25 crease_set=0
 prep_config="" main_config="" sharp_file="" patch_scale="" tag="" tokens=""
 alpha2_set=0 scale_set=0
@@ -229,9 +231,11 @@ while [ $# -gt 0 ]; do
         -quadsmoothfree) quad_smooth_free="$2"; add_token "qsmf${2}"; shift 2 ;;
         -finalsmooth) final_smooth="$2"; add_token "fsm${2}"; shift 2 ;;
         -foldguard) fold_guard=1; add_token "fg"; shift ;;
+        -nofoldguard) fold_guard=0; add_token "nofg"; shift ;;
         -minedge) min_edge="$2"; add_token "me${2}"; shift 2 ;;
         -noremesh) do_remesh=0; add_token "noremesh"; shift ;;
         -keepborder) keep_border=1; add_token "kb"; shift ;;
+        -nokeepborder) keep_border=0; add_token "nokb"; shift ;;
         -fixfeatures) fix_features=1; add_token "ff"; shift ;;
         -patchsmooth) patch_smooth="$2"; add_token "ps${2}"; shift 2 ;;
         -minval) trace_minval="$2"; add_token "mv${2}"; shift 2 ;;
@@ -364,10 +368,22 @@ if [ -z "$main_config" ]; then
     main_config="$REPO/config/main_config/flow_noalign_lemon.txt"
 fi
 
-# scaleFact/alpha der Stufe-2-Config patchen, wenn -scale/-alpha2 explizit
-# gesetzt wurden -- sonst bliebe die Faceanzahl unveraendert, weil quad_from_patches
-# sein eigenes scaleFact aus DIESER Datei liest, nicht aus der prep_config.
-if [ "$scale_set" = 1 ] || [ "$alpha2_set" = 1 ]; then
+# Stufe-2-Config patchen. scaleFact und alpha nur, wenn -scale/-alpha2
+# explizit gesetzt wurden -- sonst bliebe die Faceanzahl unveraendert,
+# weil quad_from_patches sein eigenes scaleFact aus DIESER Datei liest,
+# nicht aus der prep_config.
+#
+# ALLES UEBRIGE IMMER. Frueher stand der ganze Block unter der
+# Bedingung oben, und damit erreichten chartSmoothingIterations,
+# quadrangulationFixed/NonFixedSmoothingIterations, finalSmoothSteps,
+# finalSmoothFoldGuard und finalSmoothMinEdge die Config NUR dann, wenn
+# nebenbei -scale oder -alpha2 gesetzt war. Gemessen in der
+# Parameterstudie: elf von sechzehn Varianten lieferten Zahl fuer Zahl
+# identische Ergebnisse, weil -foldguard, -minedge, -chartsmooth,
+# -finalsmooth und -quadsmooth schlicht nicht ankamen. -alpha2 wirkte
+# dadurch doppelt: es setzte alpha UND schaltete alle uebrigen
+# Parameter erst scharf.
+if true; then
     patched_main_config="$run_dir/output/${in_stem}.main_config.txt"
     cp "$main_config" "$patched_main_config"
     if [ "$scale_set" = 1 ]; then
@@ -377,12 +393,23 @@ if [ "$scale_set" = 1 ] || [ "$alpha2_set" = 1 ]; then
             echo "scaleFact $scale_fact" >> "$patched_main_config"
         fi
     fi
-    if [ "$alpha2_set" = 1 ]; then
-        if grep -q '^alpha ' "$patched_main_config"; then
-            sed -i '' "s/^alpha .*/alpha $alpha2/" "$patched_main_config"
-        else
-            echo "alpha $alpha2" >> "$patched_main_config"
-        fi
+    # alpha IMMER schreiben. Die Datei config/main_config/*.txt traegt
+    # 0.005; stuende die Zeile weiterhin unter alpha2_set, kaeme die
+    # Vorgabe nie an und -alpha2 waere der einzige Weg dorthin.
+    #
+    # Vorgabe 0.15, weil der Parameter mit der ZIELKANTENLAENGE
+    # gekoppelt ist (QUADWILD_PARAMETER.txt, Abschnitt 2):
+    #   scale 1: 0.01 besser (44 statt 88 irregulaere Knoten)
+    #   scale 6: 0.15 noetig -- 0 statt 7 nicht-konvexe Vierecke,
+    #            Seitenverhaeltnis 6.6 statt 11.9, gestreckte Quads
+    #            3 statt 51, schlechtester Winkel 19.4 statt 1.0 Grad
+    # Ein Standard soll in die sichere Richtung irren: mehr
+    # Singularitaeten ergeben ein brauchbares Netz, umgeklappte
+    # Vierecke nicht.
+    if grep -q '^alpha ' "$patched_main_config"; then
+        sed -i '' "s/^alpha .*/alpha $alpha2/" "$patched_main_config"
+    else
+        echo "alpha $alpha2" >> "$patched_main_config"
     fi
     for zeile in "chartSmoothingIterations $chart_smooth" \
                  "quadrangulationFixedSmoothingIterations $quad_smooth_fixed" \
@@ -401,6 +428,30 @@ if [ "$scale_set" = 1 ] || [ "$alpha2_set" = 1 ]; then
     main_config="$patched_main_config"
 fi
 
+# Die WIRKSAMEN Parameter kompakt ausgeben -- auf dem Terminal und in
+# die Laufmeta. Vorher stand dort nur der PFAD der Config-Datei, und
+# genau deshalb blieb lange unbemerkt, dass -foldguard, -minedge,
+# -chartsmooth, -finalsmooth und -quadsmooth die Config gar nicht
+# erreichten (sie standen unter "if scale_set || alpha2_set"). Wer den
+# Lauf spaeter auswertet, soll ohne Quelltextlektuere sehen, was galt.
+zusammenfassung() {
+    echo "Stufe 1: sharp=$sharp_thr alpha=$alpha1 alphacurv=$alpha_curv" \
+         "scale=$scale_fact crease=$crease_angle remesh=$do_remesh" \
+         "keepborder=$keep_border${sharp_file:+ sharpfile=ja}"
+    echo "Stufe 2: alpha2=$alpha2 scale=$scale_fact csm=$chart_smooth" \
+         "qsm=$quad_smooth_fixed qsmf=$quad_smooth_free" \
+         "fsm=$final_smooth foldguard=$fold_guard minedge=$min_edge" \
+         "fixfeat=$fix_features patchsmooth=$patch_smooth"
+    [ -n "$merge_patches$merge_inradius" ] && \
+        echo "Nachlauf: mergepatches=${merge_patches:--} " \
+             "mergeinradius=${merge_inradius:--}"
+    return 0
+}
+
+echo "--- Parameter ---"
+zusammenfassung
+echo
+
 meta="$run_dir/run.meta.txt"
 hash=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "unbekannt")
 if [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null || true)" ]; then
@@ -414,6 +465,9 @@ fi
     echo "Laufordner:   $run_dir"
     echo "prep_config:  $prep_config"
     echo "main_config:  $main_config"
+    echo
+    echo "--- wirksame Parameter ---"
+    zusammenfassung
     echo
     echo "--- Stufe 1: quadwild ---"
     echo "Aufruf: quadwild $work_mesh 2 $prep_config"
