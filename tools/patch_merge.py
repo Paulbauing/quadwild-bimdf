@@ -36,6 +36,15 @@ Verschmolzen wird nur, wenn der Zwerg GENAU EINEN freien Nachbarn hat.
 Bei mehreren waere die Wahl willkuerlich und koennte den Patch in eine
 ungeschickte Form ziehen; solche Faelle bleiben stehen.
 
+AUSNAHME --mehrere-nachbarn: dann geht der Zwerg an den Nachbarn mit der
+LAENGSTEN gemeinsamen freien Grenze. Das ist die Wahl, bei der die
+kuenstliche Trennlinie am vollstaendigsten verschwindet und der Rest des
+Zwergrandes am kuerzesten in den Nachbarn hineinragt. Ergaebe sie zu
+viele Ecken, wird der naechstlaengere Nachbar versucht. Anlass: der
+schlechteste Bereich des verbreiterten 175er-Blechs (scale 4) sitzt in
+einem Splitter mit 3 Ecken, 1.26 Q^2 und 0.21 Q Inradius, der drei
+freie Nachbarn hat und deshalb stehen blieb.
+
 ECKEN. Der vergroesserte Patch erbt die Vereinigung beider Eckensaetze,
 beschraenkt auf das, was danach noch auf seinem Rand liegt -- und DANN
 werden die Ecken gestrichen, an denen der Rand gar nicht mehr abknickt.
@@ -232,7 +241,7 @@ def patch_rand(ef, patch, menge):
 
 
 def merge(prefix, min_area, scale, corner_angle=45.0, min_inradius=0.0,
-          min_corners=4, max_corners=6, verbose=True):
+          min_corners=4, max_corners=6, mehrere=False, verbose=True):
     prefix = Path(prefix)
     sh = load_obj(str(prefix.with_suffix(".obj")))
     V, F = sh["vertices"], sh["faces"]
@@ -293,29 +302,57 @@ def merge(prefix, min_area, scale, corner_angle=45.0, min_inradius=0.0,
         return A[q] < min_area or (min_inradius > 0 and inradius[q] < min_inradius)
 
     n_merge = 0
+    gewachsen = set()
     # duennste zuerst -- ein Band verschmilzt besser, solange seine
     # Nachbarn noch unveraendert sind
     for p in sorted(range(npat), key=lambda q: (inradius[q], A[q])):
         if not schlecht(p) or not (patch == p).any():
             continue
-        nb = [q for q in frei[p] if patch[patch == q].size > 0]
-        if len(nb) != 1:
+        # Flaeche und Inradius stammen von VOR den Merges. Ein Patch, der
+        # schon einen Zwerg aufgenommen hat, ist groesser als sein Wert --
+        # gemessen wurde sonst ein gerade entstandenes Viereck (Splitter
+        # 12 in Zwerg 17) gleich weiter in ein Fuenfeck gezogen.
+        if p in gewachsen:
+            if verbose:
+                print(f"   Patch {p}: hat schon einen Zwerg aufgenommen -- bleibt")
+            continue
+        # frei[p] zaehlt Kanten von Patchnummern, die durch fruehere
+        # Merges verschwunden sein koennen -- deshalb neu auszaehlen
+        laenge = collections.Counter()
+        for k, fl in ef.items():
+            if len(fl) != 2 or k in featE:
+                continue
+            a, b = patch[fl[0]], patch[fl[1]]
+            if a != b and p in (a, b):
+                a_, b_ = tuple(k)
+                laenge[b if a == p else a] += float(np.linalg.norm(V[a_] - V[b_])) / Q
+        nb = [q for q, _ in laenge.most_common()]
+        if not nb or (len(nb) > 1 and not mehrere):
             if verbose:
                 print(f"   Patch {p} ({A[p]:.2f} Q^2, Inradius {inradius[p]:.2f} Q): "
                       f"{len(nb)} freie Nachbarn -- uebersprungen")
             continue
-        ziel = nb[0]
-        menge = set(np.nonzero((patch == p) | (patch == ziel))[0])
-        rand = patch_rand(ef, patch, menge)
-        kand = sorted((set(corners[p]) | set(corners[ziel])) & rand)
-        nb = rand_nachbarn(ef, menge)
-        neu = ecken_waehlen(V, nb, kand, corner_angle, min_corners)
-        if len(neu) > max_corners:
+        ziel = None
+        for q in nb:
+            menge = set(np.nonzero((patch == p) | (patch == q))[0])
+            rand = patch_rand(ef, patch, menge)
+            kand_q = sorted((set(corners[p]) | set(corners[q])) & rand)
+            neu_q = ecken_waehlen(V, rand_nachbarn(ef, menge), kand_q,
+                                  corner_angle, min_corners)
+            if len(neu_q) <= max_corners:
+                ziel, kand, neu = q, kand_q, neu_q
+                break
             if verbose:
-                print(f"   Patch {p} ({A[p]:.2f} Q^2, Inradius {inradius[p]:.2f} Q): "
-                      f"ergaebe {len(neu)} Ecken (hoechstens {max_corners}) "
-                      f"-- uebersprungen")
+                print(f"   Patch {p} ({A[p]:.2f} Q^2, Inradius {inradius[p]:.2f} Q) -> "
+                      f"{q}: ergaebe {len(neu_q)} Ecken (hoechstens {max_corners})")
+        if ziel is None:
+            if verbose:
+                print(f"   Patch {p}: kein Nachbar zulaessig -- uebersprungen")
             continue
+        if verbose and len(nb) > 1:
+            print(f"   Patch {p}: {len(nb)} freie Nachbarn, gemeinsame Grenze "
+                  + ", ".join(f"{q}: {laenge[q]:.2f} Q" for q in nb)
+                  + f" -> {ziel}")
         if verbose:
             print(f"   Patch {p} ({A[p]:.2f} Q^2, Inradius {inradius[p]:.2f} Q, "
                   f"{int((patch == p).sum())} Dreiecke) -> Patch {ziel}; "
@@ -323,6 +360,7 @@ def merge(prefix, min_area, scale, corner_angle=45.0, min_inradius=0.0,
                   f" -> {len(neu)} nach Knickpruefung")
         patch[patch == p] = ziel
         corners[ziel] = neu
+        gewachsen.add(ziel)
         corners[p] = []
         n_merge += 1
 
@@ -373,13 +411,18 @@ def main(argv=None):
                         "6 ist die Grenze von Bi-MDF (qr_singularity_pairs.cpp "
                         "akzeptiert 3, 4, 5, 6 und wirft sonst 'weird patch "
                         "valence'). Hoeher setzen laesst Laeufe abbrechen.")
+    p.add_argument("--mehrere-nachbarn", action="store_true",
+                   help="Zwerge mit mehreren freien Nachbarn nicht "
+                        "ueberspringen, sondern dem mit der laengsten "
+                        "gemeinsamen freien Grenze zuschlagen.")
     p.add_argument("--dry-run", action="store_true",
                    help="nur rechnen, nichts schreiben")
     args = p.parse_args(argv)
 
     patch, corners, n = merge(args.prefix, args.min_area, args.scale,
                               args.corner_angle, args.min_inradius,
-                              args.min_corners, args.max_corners)
+                              args.min_corners, args.max_corners,
+                              args.mehrere_nachbarn)
     if n == 0 or args.dry_run:
         if args.dry_run:
             print("(--dry-run, nichts geschrieben)")

@@ -99,6 +99,16 @@ usage() {
     echo "                     dicksten Stelle schmaler als 2xQ sind. Faengt" >&2
     echo "                     BAENDER, die jede Flaechenschwelle bestehen." >&2
     echo "                     Sinnvoll: 0.5" >&2
+    echo "  -mergemulti        Zwerge mit MEHREREN freien Nachbarn nicht" >&2
+    echo "                     ueberspringen, sondern dem mit der laengsten" >&2
+    echo "                     gemeinsamen freien Grenze zuschlagen" >&2
+    echo "  -regionfield       Kreuzfeld je Featureregion neu (tools/region_field.py):" >&2
+    echo "                     jede Region, deren Knicke sich zu vier Ecken runden" >&2
+    echo "                     lassen, bekommt ein Feld OHNE Singularitaet." >&2
+    echo "                     Der Tracer legt dort dann keine Separatrix." >&2
+    echo "                     Braucht numpy+scipy (QW_PYTHON, sonst src/.venv)" >&2
+    echo "  -mergemaxcorners N Merges verwerfen, die mehr als N Ecken" >&2
+    echo "                     hinterlassen (Vorgabe 6 = Grenze von Bi-MDF)" >&2
     echo "  -noremoval         Pfad-Entfernung im Tracer ganz abschalten." >&2
     echo "                     Der Tracer entfernt sonst ueber die Haelfte" >&2
     echo "                     seiner Pfade wieder; Patchform spielt dabei" >&2
@@ -140,8 +150,9 @@ usage() {
     echo "  -chartsmooth N     Glaettungsdurchlaeufe je Patch nach der" >&2
     echo "                     Quadrangulierung, Patchrand fest (Default 0)" >&2
     echo "  -quadsmooth N      Glaettung der ganzen Quadrangulierung mit" >&2
-    echo "                     FESTEN Patchraendern, also unter Erhalt der" >&2
-    echo "                     Feature-Linien (Default 0)" >&2
+    echo "                     FESTEN Patchraendern (alle Patchgrenzen fest," >&2
+    echo "                     erst seit 2026-11-06 wirksam; aendert dann nichts" >&2
+    echo "                     gegenueber -finalsmooth, Default 0)" >&2
     echo "  -finalsmooth N     Schritte der ABSCHLIESSENDEN Glaettung" >&2
     echo "                     (MultiCostraintSmooth, Vorgabe 30). Andere" >&2
     echo "                     Stufe als -chartsmooth und -quadsmooth:" >&2
@@ -203,6 +214,9 @@ trace_final_removal=-1 trace_pre_remove=-1
 # Leer = aus; sonst die Flaechenschwelle in Q^2.
 merge_patches=""
 merge_inradius=""
+merge_multi=0
+merge_maxc=""
+region_field=0
 # Glaettung der fertigen Quadrangulierung. Standen in quad_from_patches
 # fest auf 0; chart_smooth laeuft je Patch mit festem Patchrand und
 # zieht in sich gefaltete Vierecke wieder auf.
@@ -247,6 +261,9 @@ while [ $# -gt 0 ]; do
         -nofinalremoval) trace_final_removal=0; add_token "nofr"; shift ;;
         -mergepatches) merge_patches="$2"; add_token "mp${2}"; shift 2 ;;
         -mergeinradius) merge_inradius="$2"; add_token "mi${2}"; shift 2 ;;
+        -mergemulti) merge_multi=1; add_token "mm"; shift ;;
+        -mergemaxcorners) merge_maxc="$2"; add_token "mc${2}"; shift 2 ;;
+        -regionfield) region_field=1; add_token "rf"; shift ;;
         -prepconfig) prep_config=$(abspath "$2")
                     add_token "prep-$(basename "$2" .txt)"; shift 2 ;;
         -mainconfig) main_config=$(abspath "$2")
@@ -480,10 +497,63 @@ fi
 cd "$REPO"
 # Die .sharp-Datei erkennt quadwild an der Endung unter den optionalen
 # Positionsargumenten ab Index 3 (quadwild.cpp), nicht ueber die Config.
-if [ -n "$sharp_file" ]; then
-    "$QUADWILD_BIN" "$work_mesh" 2 "$prep_config" "$sharp_file" 2>&1 | tee -a "$meta"
+if [ "$region_field" = 1 ]; then
+    stufe1=1
 else
-    "$QUADWILD_BIN" "$work_mesh" 2 "$prep_config" 2>&1 | tee -a "$meta"
+    stufe1=2
+fi
+if [ -n "$sharp_file" ]; then
+    "$QUADWILD_BIN" "$work_mesh" $stufe1 "$prep_config" "$sharp_file" 2>&1 | tee -a "$meta"
+else
+    "$QUADWILD_BIN" "$work_mesh" $stufe1 "$prep_config" 2>&1 | tee -a "$meta"
+fi
+
+# --- Regionenfeld (zwischen Feldberechnung und Tracing) ------------------
+#
+# QuadWilds Feldglaettung setzt in Regionen, die von ihren Ecken her gar
+# keine Singularitaet brauchen, 3/5-Dipole -- und an jeder Singularitaet
+# legt der Tracer Separatrizen. region_field.py ersetzt das Feld in diesen
+# Regionen durch eine reelle harmonische Interpolation des Randwinkels
+# (singularitaetenfrei). Dann wird mit diesem Feld getract: quadwild nimmt
+# eine .rosy entgegen und ueberspringt damit die ganze Vorverarbeitung --
+# deshalb laeuft das Tracing auf dem _rem-Netz aus Schritt 1, in einem
+# eigenen Unterordner (quadwild haengt an den Netznamen _rem an).
+if [ "$region_field" = 1 ]; then
+    rem_stem="$run_dir/output/${in_stem}_rem"
+    rf_py="$REPO/tools/region_field.py"
+    rf_bin="${QW_PYTHON:-}"
+    if [ -z "$rf_bin" ]; then
+        if [ -x "$REPO/../src/.venv/bin/python" ]; then
+            rf_bin="$REPO/../src/.venv/bin/python"
+        else
+            rf_bin=python3
+        fi
+    fi
+    {
+        echo
+        echo "--- Zwischenschritt: region_field.py ---"
+        echo "Aufruf: region_field.py $rem_stem"
+    } >> "$meta"
+    if ! "$rf_bin" "$rf_py" "$rem_stem" 2>&1 | tee -a "$meta"; then
+        echo "run_quadwild.sh: region_field.py fehlgeschlagen, breche ab." >&2
+        exit 1
+    fi
+    feld_dir="$run_dir/output/regionenfeld"
+    mkdir -p "$feld_dir"
+    cp "$rem_stem.obj"   "$feld_dir/${in_stem}.obj"
+    cp "$rem_stem.sharp" "$feld_dir/${in_stem}.sharp"
+    cp "$rem_stem.rosy"  "$feld_dir/${in_stem}.rosy"
+    {
+        echo
+        echo "--- Tracing mit Regionenfeld ---"
+        echo "Aufruf: quadwild $feld_dir/${in_stem}.obj 2 $prep_config ${in_stem}.sharp ${in_stem}.rosy"
+    } >> "$meta"
+    "$QUADWILD_BIN" "$feld_dir/${in_stem}.obj" 2 "$prep_config" \
+        "$feld_dir/${in_stem}.sharp" "$feld_dir/${in_stem}.rosy" 2>&1 | tee -a "$meta"
+    for e in obj patch corners feature c_feature; do
+        [ -f "$feld_dir/${in_stem}_rem_p0.$e" ] && \
+            cp "$feld_dir/${in_stem}_rem_p0.$e" "$run_dir/output/${in_stem}_rem_p0.$e"
+    done
 fi
 
 rem_p0="$run_dir/output/${in_stem}_rem_p0.obj"
@@ -523,6 +593,8 @@ if [ -n "$merge_patches" ] || [ -n "$merge_inradius" ]; then
         } >> "$meta"
         merge_args=(--min-area "$merge_patches" --scale "$scale_fact")
         [ -n "$merge_inradius" ] && merge_args+=(--min-inradius "$merge_inradius")
+        [ "$merge_multi" = 1 ] && merge_args+=(--mehrere-nachbarn)
+        [ -n "$merge_maxc" ] && merge_args+=(--max-corners "$merge_maxc")
         "$merge_bin" "$merge_py" "$run_dir/output/${in_stem}_rem_p0" \
             "${merge_args[@]}" 2>&1 | tee -a "$meta"
     else

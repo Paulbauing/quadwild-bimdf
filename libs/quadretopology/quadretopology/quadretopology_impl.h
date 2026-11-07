@@ -980,6 +980,17 @@ void quadrangulate(
     }
 
 
+    // Fork: fixedVerticesSet enthaelt nur Punkte von fixedPositionSubsides,
+    // und die uebergibt quad_from_patches leer. Damit hielt das "feste"
+    // Glaetten (quadrangulationFixedSmoothingIterations) nichts fest und war
+    // gleichbedeutend mit dem freien -- die Featurelinien wanderten weg.
+    // Hier kommen alle Punkte auf Patchgrenzen dazu (Ecken eingeschlossen).
+    for (const std::vector<size_t>& subsideVertices : subsideVertexMap) {
+        for (const size_t& vId : subsideVertices) {
+            fixedVerticesSet.insert(vId);
+        }
+    }
+
     std::vector<size_t> quadrangulationVerticesBetweenPatch;
     for (const size_t& vId : fixedVerticesSet) {
         if (quadrangulation.vert[vId].IsD())

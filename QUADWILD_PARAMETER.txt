@@ -122,25 +122,58 @@ zwischen 0.01 und 0.15, ohne deren Vorteile zu erreichen.
 
 
 --------------------------------------------------------------------------------
-3. DIE FALLE: -quadsmooth UND -quadsmoothfree
+3. DIE FALLE: -quadsmooth UND -quadsmoothfree  (korrigiert 2026-11-06)
 --------------------------------------------------------------------------------
 
-Beide liefern mit Abstand die besten Elementkennzahlen:
+KORREKTUR: Die beiden Varianten waren bis 2026-11-06 DIESELBE.
 
-    Sickenplatte   schlechtester Winkel 22.8, kein Winkel unter 20
-    175er-Platte   schlechtester Winkel 30.6, Seitenverhaeltnis 3.9,
-                   kein Quad ueber 5, kein Winkel unter 20
+quadrangulationFixedSmoothingIterations (-quadsmooth) haelt nur die Punkte
+in quadrangulationVerticesBetweenPatch fest. Diese Liste wurde in
+QuadRetopology::quadrangulate (quadretopology_impl.h) ausschliesslich aus
+fixedPositionSubsides gefuellt -- ein Parameter fuer das iterative
+Remeshing der Bibliothek, den quad_from_patches LEER uebergibt
+(quad_from_patches.cpp, "std::vector<size_t> fixedPositionSubsides;").
+Ergebnis: nichts war fest, -quadsmooth glaettete genauso frei wie
+-quadsmoothfree (der Aussenrand ist in LaplacianReproject immer fest).
+Die frueheren Zahlen unten gelten deshalb fuer BEIDE als "frei".
 
-Und zugleich den schlechtesten Feature-Abstand der ganzen Studie:
+BEHOBEN (Fork, quadretopology_impl.h): vor dem Aufbau der Liste kommen
+alle Punkte aller Subsides dazu, d.h. jede Patchgrenze samt Ecken ist fest.
 
-    Sickenplatte   0.0119 -> 0.1530   (13-fach)
-    175er-Platte   0.0367 -> 0.2972   ( 8-fach)
+Fruehere Messung (eigentlich beide frei):
 
-Die Quads folgen den Featurelinien dann nicht mehr -- die Glaettung zieht
-sie von den Kanten weg. Wer nur auf Winkel und Seitenverhaeltnis schaut,
-haelt das fuer den Gewinner der Studie. NICHT VERWENDEN, solange
-Feature-Treue das Ziel ist.
+    Sickenplatte   schlechtester Winkel 22.8, Feature-Abstand 0.0119 -> 0.1530
+    175er-Platte   schlechtester Winkel 30.6, SV 3.9, kein Quad > 5,
+                   Feature-Abstand 0.0367 -> 0.2972
 
+Nachmessung 2026-11-06, verbreitertes Blech (plate_breit_1106, scale 4,
+75 Patches, 375 Quads). Feature-Abstand = Abstand der Eingabe-Featurekanten
+zur naechsten Quadkante, in Kantenlaengen h des Eingabenetzes:
+
+                        Feature-Abstand          schlechtester   SV
+                        p50    p90    max        Winkel          p95   max
+    ohne                0.15   0.35   1.53 h     14.0            2.84  6.88
+    -quadsmooth 5       0.15   0.35   1.53 h     14.0            2.84  6.88
+      (fest, repariert)
+    -quadsmoothfree 5   0.53   1.39   3.10 h     36.6            2.00  2.90
+
+Lesart:
+  - Das feste Glaetten aendert NICHTS. Das Patchinnere ist durch
+    -finalsmooth (30 Schritte) schon entspannt.
+  - Der gesamte Qualitaetsgewinn der freien Variante kommt aus dem
+    Verschieben der Patchgrenzpunkte -- auch derer auf den Features
+    (p90 4-fach schlechter).
+  - Die schlechten Winkel und Seitenverhaeltnisse sitzen also an der
+    Lage der Grenzpunkte, d.h. an der Patch-Topologie, nicht im Inneren.
+
+-quadsmoothfree bleibt: NICHT VERWENDEN, solange Feature-Treue das Ziel
+ist. -quadsmooth ist jetzt unschaedlich, aber wirkungslos.
+
+Die uebrigen Reparaturen der Bibliothek:
+  Doublet-Entfernung     an (Vorgabe), laeuft
+  Feasibility-Fix        aus; greift nur, wenn die Quantisierung keine
+                         Loesung findet -- kommt hier nicht vor
+  Result-Smoothing       wird in quad_from_patches nie aufgerufen
 
 --------------------------------------------------------------------------------
 4. WARUM DIE MITTE VERDREHT IST -- TOPOLOGISCH ERZWUNGEN
