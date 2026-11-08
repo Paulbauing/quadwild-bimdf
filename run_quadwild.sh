@@ -15,7 +15,7 @@
 #
 # Aufruf:
 #   ./run_quadwild.sh -i input.obj \
-#       [-sharp 35] [-alpha 0.01] [-alpha2 0.005] [-alphacurv 0.3] [-scale 1] [-noremesh] \
+#       [-sharp 35] [-alpha 0.01] [-alpha2 0.1] [-alphacurv 0.3] [-scale 1] [-noremesh] \
 #       [-sharpfile DATEI] [-creaseangle 25] [-prepconfig DATEI] \
 #       [-mainconfig DATEI] [-tag LABEL]
 #
@@ -81,7 +81,7 @@ usage() {
     echo "                     Aufraeumen ab und erhaelt auch glatte Linien" >&2
     echo "                     ohne Knick. Default 25 wie in QuadWild" >&2
     echo "  -alpha WERT        alpha fuer Remesh/Feld-Stufe (Default: 0.01)" >&2
-    echo "  -alpha2 WERT       alpha fuer Quantisierungs-Stufe (Default: 0.005)" >&2
+    echo "  -alpha2 WERT       alpha fuer Quantisierungs-Stufe (Default: 0.1, siehe QUADWILD_PARAMETER.txt Abschn. 2)" >&2
     echo "  -alphacurv WERT    Gewicht des Kruemmungsterms in der Kreuzfeld-" >&2
     echo "                     Glaettung: 0 = kein direkter Kruemmungseinfluss," >&2
     echo "                     groesser = staerker an Hauptkruemmungsrichtung" >&2
@@ -204,7 +204,7 @@ add_token() {
 }
 
 in_mesh=""
-sharp_thr=35 alpha1=0.01 alpha2=0.15 alpha_curv=0.3 scale_fact=1 do_remesh=1
+sharp_thr=35 alpha1=0.01 alpha2=0.1 alpha_curv=0.3 scale_fact=1 do_remesh=1
 # Randvertices beim Remeshing festhalten (collapseSurvivingMicroEdges in
 # AutoRemesher.h). Aus Vorgabe = bisheriges Verhalten.
 keep_border=1 fix_features=0 patch_smooth=-1

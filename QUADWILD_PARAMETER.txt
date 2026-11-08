@@ -67,7 +67,58 @@ weiterhin nur bei explizitem -scale/-alpha2 gesetzt.
 2. ERGEBNIS: -alpha2 IST DER EINZIGE PARAMETER MIT ECHTEM GEWINN
 --------------------------------------------------------------------------------
 
-VORGABE: -alpha2 0.15
+VORGABE: -alpha2 0.1   (seit 2026-11-08, vorher 0.15)
+
+2a. FEINE REIHE MIT REGIONENFELD (2026-11-08)
+
+Gemessen mit -regionfield -noremesh -sharpfile, alpha2 von 0.01 bis 0.50
+in 0.01-Schritten (dazu 0.025/0.075/0.125), 106 Laeufe:
+    plate_breit_1106                    scale 4
+    plate_result_175_tria_remesh_1105   scale 2
+Daten: doku/alpha2_reihe.csv, Diagramm: doku/alpha2_reihe.png
+Laufordner: runs/<netz>/sharpfile_scale{4,2}_noremesh_rf_alpha2-<wert>
+
+"schlecht" = Quad mit Innenwinkel > 145 Grad, < 40 Grad oder
+Seitenverhaeltnis > 4 (jedes Quad einmal gezaehlt, in dieser Reihenfolge).
+
+    alpha2   breit: schlecht  p90      1105: schlecht  p90
+    0.08       22  (6.5 %)    0.446 h    36  (2.9 %)    0.169 h
+    0.09       21  (6.3 %)    0.428 h    29  (2.4 %)    0.158 h
+    0.10       17  (5.0 %)    0.380 h    34  (2.7 %)    0.156 h
+    0.11       22  (6.4 %)    0.378 h    33  (2.5 %)    0.147 h
+    0.12       22  (6.4 %)    0.378 h    50  (3.8 %)    0.143 h
+    0.15       22  (6.4 %)    0.378 h    59  (4.6 %)    0.144 h
+    (p90 = Abstand Eingabe-Featurelinie -> naechste Quadkante, in h)
+
+Zwei gegenlaeufige Fehler bestimmen die Kurve:
+  - gestreckte Quads (SV > 4) bei kleinem alpha2: die Regularitaet
+    erzwingt gleiche Unterteilung, der Laengenunterschied der beiden
+    Bandseiten wandert in gestreckte Quads. Sie fallen zwischen 0.08 und
+    0.10 auf beiden Platten auf ~2.
+  - Winkel nahe 180 Grad bei grossem alpha2: mit mehr Laengentreue faengt
+    ein einzelnes Quad im einquadbreiten Band die Differenz auf. Sie
+    steigen ab 0.11 (breit) bzw. 0.12 (1105) sprunghaft.
+Das gemeinsame Fenster ist 0.09-0.11; 0.1 liegt auf beiden Platten darin
+(breit: Optimum, 1105: 5 Quads ueber dem Optimum bei 0.09). 0.09 waere auf
+1105 etwas besser, kostet auf breit aber 13 % Feature-Abstand.
+
+Irregulaere Knoten steigen fast monoton mit alpha2, der Feature-Abstand
+faellt monoton -- beide haben kein inneres Minimum. Auf breit ist der
+Feature-Abstand bei 0.1 bereits auf dem Endniveau.
+
+VORSICHT bei der Deutung: die Kurven sind Treppen (ganzzahlige
+Quantisierung). Auf breit sind 0.11 bis 0.15 bitgleich, und das Minimum
+bei 0.10 ist ein einzelner Punkt (Nachbarn 21 und 22). 0.1 ist als Mitte
+des guten Fensters zu lesen, nicht als scharfes Optimum.
+
+NICHT NEU GEMESSEN: die Sickenplatte und scale 6. Die Tabelle unten
+(ohne Regionenfeld) begruendete 0.15 gerade mit scale 6 auf der
+Sickenplatte. Wer dort grob rechnet, prueft 0.1 gegen 0.15.
+
+Laufordner OHNE alpha2-Token stammen vor diesem Datum von 0.15, danach
+von 0.1.
+
+2b. AELTERE REIHE OHNE REGIONENFELD (Begruendung der frueheren Vorgabe 0.15)
 
 ACHTUNG, KORREKTUR: die erste Fassung dieses Abschnitts empfahl 0.01.
 Diese Empfehlung war zu eng gemessen -- der Sweep lief AUSSCHLIESSLICH
