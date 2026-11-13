@@ -161,7 +161,7 @@ usage() {
     echo "                     Grossteil der Laufzeit." >&2
     echo "  -minedge F         Untergrenze fuer die kuerzeste Kante einer" >&2
     echo "                     Facette beim Glaetten, als Anteil der" >&2
-    echo "                     Zielkantenlaenge (Vorgabe 0.25). Greift nur" >&2
+    echo "                     Zielkantenlaenge (Vorgabe 0.5). Greift nur" >&2
     echo "                     mit -foldguard. Zu klein laesst Vierecke am" >&2
     echo "                     Rand zusammendruecken." >&2
     echo "  -nofoldguard      Faltungsschutz der Schlussglaettung AUS (Vorgabe: an)" >&2
@@ -206,7 +206,9 @@ add_token() {
 in_mesh=""
 sharp_thr=35 alpha1=0.01 alpha2=0.1 alpha_curv=0.3 scale_fact=1 do_remesh=1
 # Randvertices beim Remeshing festhalten (collapseSurvivingMicroEdges in
-# AutoRemesher.h). Aus Vorgabe = bisheriges Verhalten.
+# AutoRemesher.h). An seit 21.09. (306be1d): ohne Randerhalt lagen 72 von
+# 293 Randvertices nach innen versetzt, mittlerer Randknick 5.0 -> 15.9
+# Grad. -nokeepborder stellt das alte Verhalten wieder her.
 keep_border=1 fix_features=0 patch_smooth=-1
 trace_minval=-1 trace_maxval=-1 trace_cclark=-1 trace_drift=-1 trace_sampleratio=-1
 trace_final_removal=-1 trace_pre_remove=-1
