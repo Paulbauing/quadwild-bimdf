@@ -102,6 +102,8 @@ usage() {
     echo "  -mergemulti        Zwerge mit MEHREREN freien Nachbarn nicht" >&2
     echo "                     ueberspringen, sondern dem mit der laengsten" >&2
     echo "                     gemeinsamen freien Grenze zuschlagen" >&2
+    echo "  -view              nach dem Lauf den Viewer oeffnen (src/ridges_new/quadwild_view.py:" >&2
+    echo "                     Eingabe mit Feature-Kanten, Kreuzfeld, Patches, Quad-Netz)" >&2
     echo "  -regionfield       Kreuzfeld je Featureregion neu (tools/region_field.py):" >&2
     echo "                     jede Region, deren Knicke sich zu vier Ecken runden" >&2
     echo "                     lassen, bekommt ein Feld OHNE Singularitaet." >&2
@@ -266,6 +268,7 @@ while [ $# -gt 0 ]; do
         -mergemulti) merge_multi=1; add_token "mm"; shift ;;
         -mergemaxcorners) merge_maxc="$2"; add_token "mc${2}"; shift 2 ;;
         -regionfield) region_field=1; add_token "rf"; shift ;;
+        -view) view_after=1; shift ;;
         -prepconfig) prep_config=$(abspath "$2")
                     add_token "prep-$(basename "$2" .txt)"; shift 2 ;;
         -mainconfig) main_config=$(abspath "$2")
@@ -638,3 +641,9 @@ cp "$result" "$final"
 echo
 echo "Ergebnis:  $final"
 echo "Protokoll: $meta"
+
+if [ -n "${view_after:-}" ]; then
+    view_py="$REPO/../src/ridges_new/quadwild_view.py"
+    view_bin="${QW_PYTHON:-$REPO/../src/.venv/bin/python}"
+    "$view_bin" "$view_py" "$final"
+fi
