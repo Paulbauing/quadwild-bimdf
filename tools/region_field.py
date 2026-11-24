@@ -435,6 +435,13 @@ def reell(netz, faces, feat, frei_kanten=3, knick_frei=20.0):
                 g = fl[0] if fl[1] == f else fl[1]
                 if g in fset:
                     nachbarn[f].append((g, kk))
+    # OHNE JEDE RANDBINDUNG ist das System singulaer (nur Neumann), das
+    # Feld wird NaN. Passiert bei winzigen Regionen, deren Rand so kurz
+    # ist, dass die Freigabe oben alle Bindungen entfernt (19.11.,
+    # bead_plate_wide_quadsplit: Region aus 7 Dreiecken). Dann bleibt
+    # QuadWilds Feld.
+    if not ziel:
+        return None
     frei = [f for f in faces if f not in ziel]
     theta = np.zeros(len(netz.F))
     for f, w in ziel.items():
@@ -455,6 +462,8 @@ def reell(netz, faces, feat, frei_kanten=3, knick_frei=20.0):
                     rhs[i] += theta[g]
         A = sp.csr_matrix((vals, (rows, cols)), shape=(len(frei), len(frei)))
         x = spla.spsolve(A.tocsc(), rhs)
+        if not np.all(np.isfinite(x)):
+            return None          # Teil der Region ohne Randbindung
         for f, i in idx.items():
             theta[f] = x[i]
     return theta
