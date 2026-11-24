@@ -283,7 +283,11 @@ done
 # die gar nicht im Binary steckt.
 if [ -z "${QW_NOBUILD:-}" ]; then
     if [ ! -d "$BUILD" ]; then
-        cmake -S "$REPO" -B "$BUILD" -DSATSUMA_ENABLE_BLOSSOM5=0
+        # Auf Apple Silicon nativ bauen: cmake liegt hier als Intel-Version unter
+        # /usr/local und wuerde sonst x86_64 erzeugen (laeuft dann unter Rosetta)
+        arch_flag=""
+        [ "$(uname -m)" = "arm64" ] && arch_flag="-DCMAKE_OSX_ARCHITECTURES=arm64"
+        cmake -S "$REPO" -B "$BUILD" -DSATSUMA_ENABLE_BLOSSOM5=0 -DCMAKE_BUILD_TYPE=Release $arch_flag
     fi
     if ! cmake --build "$BUILD" -j; then
         echo >&2
@@ -585,7 +589,11 @@ if [ -n "$merge_patches" ] || [ -n "$merge_inradius" ]; then
     # Pfad und dessen venv -- eine Abhaengigkeit ueber die Repogrenze fuer
     # ein Skript, das ausschliesslich hier gebraucht wird.
     merge_py="$REPO/tools/patch_merge.py"
-    merge_bin="${QW_PYTHON:-python3}"
+    merge_bin="${QW_PYTHON:-}"
+    if [ -z "$merge_bin" ]; then
+        # natives venv des Hauptrepos (numpy dabei), sonst python3
+        if [ -x "$REPO/../src/.venv/bin/python" ]; then merge_bin="$REPO/../src/.venv/bin/python"; else merge_bin=python3; fi
+    fi
     if [ -f "$merge_py" ]; then
         {
             echo
